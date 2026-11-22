@@ -655,7 +655,7 @@ def replay(run):
         assert db.execute("SELECT count(*) FROM commands WHERE json_extract(receipt,'$.status')='REFUSED'").fetchone()[0]==1
     run.check("refused-command-does-not-block-subsequent-session-writes")
     assert "私聊哨兵" not in json.dumps(run.proxy.calls,ensure_ascii=False)
-    assert run.contract_calls=={p for p in run.spec["paths"] if not p.startswith("/v2/visibility-grants")}
+    assert run.contract_calls=={"/v2/"+p for p in ("ingest","candidates","corrections","recall","read","health","receipts","changes")}
     run.check("openapi-schemas-for-all-eight-live-endpoints",paths=sorted(run.contract_calls))
 
 

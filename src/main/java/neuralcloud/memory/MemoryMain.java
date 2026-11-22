@@ -18,14 +18,23 @@ public final class MemoryMain {
     private final Store store;
     private final Ledger ledger;
     private final Reader reader;
+    private final CardCatalog catalog;
+    private final CellSearch.Mode retrievalMode;
     private final byte[] authorization;
     private final byte[] channelAuthorization;
     private final String grantAccount;
 
-    private MemoryMain(Store store, String token, String channelToken, String grantAccount) {
+    private MemoryMain(
+            Store store,
+            String token,
+            String channelToken,
+            String grantAccount,
+            CellSearch.Mode retrievalMode) {
         this.store = store;
         ledger = new Ledger(store);
-        reader = new Reader(store);
+        this.retrievalMode = retrievalMode;
+        reader = new Reader(store, retrievalMode);
+        catalog = new CardCatalog(store, reader);
         authorization = ("Bearer " + token).getBytes(StandardCharsets.UTF_8);
         channelAuthorization =
                 channelToken == null
@@ -45,6 +54,12 @@ public final class MemoryMain {
             settings.load(file);
         }
         var fields = new HashSet<>(settings.stringPropertyNames());
+        fields.remove("retrievalMode");
+        fields.remove("organizeIntervalSeconds");
+        var mode = CellSearch.Mode.valueOf(settings.getProperty("retrievalMode", "CELLS"));
+        int interval = Integer.parseInt(settings.getProperty("organizeIntervalSeconds", "30"));
+        if (interval < 0 || interval > 86400)
+            throw new IllegalArgumentException("organizeIntervalSeconds");
         boolean grants = fields.removeAll(Set.of("grantAccountId", "grantAccessTokenEnv"));
         if (!fields.equals(
                 Set.of("port", "dataDirectory", "characterId", "accessTokenEnv", "sourceInstance")))
@@ -81,13 +96,29 @@ public final class MemoryMain {
                         character,
                         source);
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", port), 64);
-        server.createContext("/v2/", new MemoryMain(store, token, channelToken, account)::handle);
+        var service = new MemoryMain(store, token, channelToken, account, mode);
+        server.createContext("/v2/", service::handle);
+        var organizer = Executors.newSingleThreadScheduledExecutor();
+        if (interval > 0)
+            organizer.scheduleWithFixedDelay(
+                    () -> {
+                        try {
+                            store.transaction(() -> service.catalog.advance(16));
+                        } catch (SQLException failure) {
+                            // 水位随事务回滚；记录失败，下一次从同一水位重试。
+                            failure.printStackTrace();
+                        }
+                    },
+                    interval,
+                    interval,
+                    java.util.concurrent.TimeUnit.SECONDS);
         var executor = Executors.newVirtualThreadPerTaskExecutor();
         server.setExecutor(executor);
         Runtime.getRuntime()
                 .addShutdownHook(
                         new Thread(
                                 () -> {
+                                    organizer.shutdownNow();
                                     server.stop(1);
                                     executor.close();
                                     try {
@@ -125,7 +156,14 @@ public final class MemoryMain {
             boolean get = Set.of("health", "receipts", "changes").contains(path);
             if (!get
                     && !grant
-                    && !Set.of("ingest", "candidates", "corrections", "read", "recall")
+                    && !Set.of(
+                                    "ingest",
+                                    "candidates",
+                                    "corrections",
+                                    "read",
+                                    "recall",
+                                    "cards",
+                                    "organize")
                             .contains(path)) throw new Fault(404, "NOT_FOUND", "route");
             if (!exchange.getRequestMethod().equals(get ? "GET" : "POST"))
                 throw new Fault(405, "METHOD_NOT_ALLOWED", "method");
@@ -140,6 +178,10 @@ public final class MemoryMain {
                                             var info = store.info();
                                             info.getAsJsonArray("capabilities")
                                                     .add("audience_reads");
+                                            info.addProperty(
+                                                    "retrieval_mode", retrievalMode.name());
+                                            info.getAsJsonArray("capabilities")
+                                                    .add("audience_cards");
                                             if (channelAuthorization != null)
                                                 info.getAsJsonArray("capabilities")
                                                         .add("author_grants");
@@ -153,6 +195,8 @@ public final class MemoryMain {
                                         }
                                         case "changes" -> reader.changes(body);
                                         case "read" -> reader.read(body);
+                                        case "cards" -> catalog.cards(body);
+                                        case "organize" -> catalog.organize(body);
                                         case "recall" -> reader.recall(body);
                                         default -> ledger.write(path, body);
                                     });

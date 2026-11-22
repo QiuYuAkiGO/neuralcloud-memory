@@ -144,6 +144,7 @@ class GeminiMeeting:
             plan=plan["data"]["kind"],
             planning_usage=plan["data"]["usage"],
             reply_event=reply["eventId"],
+            harness_latency_ms=reply["data"]["latencyMs"],
             incoming=receipts[0],
             outgoing=receipts[1],
             delivered=delivery,
@@ -191,7 +192,7 @@ class GeminiMeeting:
         )["incoming"]
         new = self.turn(
             "reschedule",
-            "例会改到周六 10 点。",
+            "周五会议室要检修，所以例会改到周六 10 点。",
             meeting_source("2026-11-21T10:00:00+08:00", "2026-11-19T10:00:00+08:00", old),
         )["incoming"]
         self.check(
@@ -207,6 +208,8 @@ class GeminiMeeting:
             and first is not None and second is not None and first.start() < second.start()
             and "小林" in recap["answer"] and "项目群" in recap["answer"],
         )
+        self.check("recap explains the attested reason to the user", "会议室" in recap["answer"]
+                   and any(word in recap["answer"] for word in ("检修", "维修", "维护")))
         original = self.turn("ask-original", "请查一下例会的原始发言。最初约在星期几几点，是谁在哪儿说的？")
         current = self.turn(
             "ask-current", "请核对例会改期的那条原话。最新安排在星期几几点？请带上发言人和场合。"
@@ -347,7 +350,17 @@ def states_arrangement(answer, slot, *, historical=False):
         else r"当前|目前|现在|最新|改[到成为]|还有效|仍然有效|只剩"
     )
     clauses = re.split(r"[，。！？；,;\n]|不过|但是|后来(?=改)", answer)
-    return any(re.search(marker, clause) and describes(clause, slot) for clause in clauses)
+    clauses = [c.strip(' “”。「」') for c in clauses if c.strip(' “”。「」')]
+    for i, clause in enumerate(clauses):
+        if not describes(clause, slot):
+            continue
+        if re.search(marker, clause):
+            return True
+        # “周五 15 点。”不过那是历史安排。 The demonstrative qualifies the preceding notice.
+        if historical and i + 1 < len(clauses) and re.match(
+                r"(?:这|那|该)(?:条|个|项|则)?(?:是|属于|只是)(?:当时的|之前的)?历史安排", clauses[i + 1]):
+            return True
+    return False
 
 
 def uncertain(answer):
@@ -384,6 +397,7 @@ def main():
     parser.add_argument(
         "--serve", action="store_true", help="Keep this real Gemini console up after the case."
     )
+    parser.add_argument("--max-output-tokens", type=int, help="Override the official worker output budget in this isolated run.")
     args = parser.parse_args()
     config = args.harness.resolve() / "java/src/main/resources/config/chat-worker-gemini.properties"
     cfg = dict(
@@ -403,6 +417,12 @@ def main():
     if not os.environ.get(key_env):
         parser.error("Set " + key_env + " in the launch environment.")
     pair = ServicePair(args.harness, **previous_services(args.resume_demo))
+    if args.max_output_tokens is not None:
+        if args.max_output_tokens < 1:
+            parser.error("--max-output-tokens must be positive")
+        cfg["maxOutputTokens"] = str(args.max_output_tokens)
+        config = pair.out / "gemini-worker.properties"
+        props(config, cfg)
     pair.harness_env = pair.env.copy()
     pair.env.pop(key_env)
     # The JVM uses its default TLS roots and the repository's configured CONNECT proxy.
@@ -436,7 +456,7 @@ def main():
         pair.harness_start()
         node = next(n for n in send(pair.console + "nodes")["nodes"] if n["id"] == "chat-worker")
         assert node["endpoint"] == cfg["endpoint"]
-        case.report.update(stream_id=health["stream_id"], processes=pair.pids)
+        case.report.update(stream_id=health["stream_id"], retrieval_mode=health.get("retrieval_mode"), max_output_tokens=int(cfg["maxOutputTokens"]), processes=pair.pids)
         manifest = dict(
             console=pair.console.removesuffix("api/"),
             chat_url=pair.console.removesuffix("api/") + "?chain=" + case.chain,

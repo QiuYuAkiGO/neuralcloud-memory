@@ -1,0 +1,10 @@
+CREATE VIRTUAL TABLE cell_search USING fts5(words,dates);
+CREATE TABLE claim_times(record_id TEXT NOT NULL,revision INTEGER NOT NULL,effective_utc TEXT NOT NULL,previous_id TEXT,previous_revision INTEGER,PRIMARY KEY(record_id,revision),FOREIGN KEY(record_id,revision) REFERENCES revisions(record_id,revision));
+CREATE INDEX claim_successors ON claim_times(previous_id,previous_revision,effective_utc);
+CREATE INDEX revisions_reply ON revisions(json_extract(body,'$.reply_to.record_id'));
+CREATE TABLE card_members(axis TEXT NOT NULL,title TEXT NOT NULL,record_id TEXT NOT NULL REFERENCES records(id),revision INTEGER NOT NULL,expires_at TEXT,PRIMARY KEY(axis,title,record_id));
+CREATE INDEX card_expiry ON card_members(expires_at) WHERE expires_at IS NOT NULL;
+CREATE INDEX card_source ON card_members(record_id);
+CREATE TABLE catalog_state(singleton INTEGER PRIMARY KEY CHECK(singleton=1),cursor INTEGER NOT NULL);
+INSERT INTO catalog_state VALUES(1,0);
+PRAGMA user_version=4;

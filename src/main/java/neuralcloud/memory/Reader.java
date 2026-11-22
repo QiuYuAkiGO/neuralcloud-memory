@@ -10,7 +10,7 @@ import java.util.*;
 
 final class Reader {
     private final Store store;
-    private static final String LATEST =
+    static final String LATEST =
             """
             SELECT r.id,r.conversation,r.kind,r.status,v.revision,v.occurred,v.body FROM records r
             JOIN revisions v ON v.record_id=r.id AND v.revision=r.revision """;
@@ -20,8 +20,15 @@ SELECT r.id,r.conversation,r.kind,r.status,v.revision,v.occurred,v.body FROM rec
 JOIN revisions v ON v.record_id=r.id AND v.seq=(
   SELECT max(prev.seq) FROM revisions prev WHERE prev.record_id=r.id AND prev.seq<=?) """;
 
+    private final CellSearch.Mode mode;
+
     Reader(Store store) {
+        this(store, CellSearch.Mode.LEXICAL);
+    }
+
+    Reader(Store store, CellSearch.Mode mode) {
         this.store = store;
+        this.mode = mode;
     }
 
     JsonObject changes(JsonObject q) throws SQLException {
@@ -55,14 +62,28 @@ ORDER BY id""",
         return sources.isEmpty() ? List.of(ref(get(row, "id"), num(row, "revision"))) : sources;
     }
 
-    private JsonObject item(
+    // An extract or sent reply inherits the shortest lifetime of its version-bound source chain.
+    String dependencyExpiry(String id) throws SQLException {
+        var rows =
+                store.rows(
+                        """
+SELECT min(json_extract(v.body,'$.assertion.valid_until')) expiry
+FROM evidence_dependencies d JOIN revisions v ON v.record_id=d.source AND v.revision=d.revision
+WHERE d.derived=?""",
+                        id);
+        var value = rows.getFirst().get("expiry");
+        return value.isJsonNull() ? null : value.getAsString();
+    }
+
+    JsonObject item(
             Access ctx,
             JsonObject row,
             String purpose,
             String use,
             int start,
             int length,
-            String view)
+            String view,
+            String at)
             throws SQLException {
         var reference = ref(get(row, "id"), num(row, "revision"));
         if (!"ONLINE".equals(get(row, "status")))
@@ -99,7 +120,9 @@ ORDER BY id""",
         if (purpose.equals("HISTORY")
                 && (!get(row, "conversation").equals(ctx.scope())
                         || !store.rows(
-                                        "SELECT 1 FROM evidence_dependencies d JOIN records p ON p.id=d.source WHERE d.derived=? AND p.conversation<>? LIMIT 1",
+                                        "SELECT 1 FROM evidence_dependencies d JOIN records p ON"
+                                                + " p.id=d.source WHERE d.derived=? AND"
+                                                + " p.conversation<>? LIMIT 1",
                                         get(row, "id"),
                                         ctx.scope())
                                 .isEmpty())) out.addProperty("grant_dependent", true);
@@ -111,7 +134,16 @@ ORDER BY id""",
                     get(object(body, "channel"), "type").equals("qq_group") ? "QQ 群聊" : "QQ 私聊");
             out.addProperty("speaker", "当前账号本人");
         } else {
-            for (String key : List.of("speaker", "source_venue", "action_id", "assertion"))
+            if (body.has("source_refs")) {
+                String expiry = dependencyExpiry(get(row, "id"));
+                if (expiry != null) {
+                    out.addProperty("evidence_valid_until", expiry);
+                    out.addProperty("evidence_active", expiry.compareTo(at) > 0);
+                }
+            }
+            var dates = CellSearch.dates(body);
+            if (!dates.isEmpty()) out.add("resolved_dates", JSON.toJsonTree(dates));
+            for (String key : List.of("speaker", "source_venue", "action_id", "assertion", "topic"))
                 if (body.has(key)) out.add(key, body.get(key));
             if (!get(row, "conversation").equals(ctx.scope()) && body.has("channel")) {
                 if (out.has("speaker") && "用户".equals(get(out, "speaker")))
@@ -204,7 +236,16 @@ AND json_extract(v.body,'$.channel.account_id')=? AND json_extract(v.body,'$.cha
                 items.add(obj("status", "NOT_FOUND", "record_id", id));
                 continue;
             }
-            var result = item(ctx, rows.getFirst(), purpose, use, start, length, "L2");
+            var result =
+                    item(
+                            ctx,
+                            rows.getFirst(),
+                            purpose,
+                            use,
+                            start,
+                            length,
+                            "L2",
+                            utc(Instant.now()));
             if (result.has("assertion")) {
                 var a = object(result, "assertion");
                 var active =
@@ -265,7 +306,8 @@ ORDER BY v.seq DESC""",
         for (var row : all) {
             var a = object(parse(get(row, "body")), "assertion");
             if (time(a, "effective_at").compareTo(at) > 0) continue;
-            eligible.add(row);
+            if (!a.has("valid_until") || time(a, "valid_until").compareTo(at) > 0)
+                eligible.add(row);
             if (a.has("supersedes_ref")) {
                 var ref = object(a, "supersedes_ref");
                 superseded.add(new Revision(get(ref, "record_id"), num(ref, "revision")));
@@ -274,6 +316,25 @@ ORDER BY v.seq DESC""",
         return eligible.stream()
                 .filter(r -> !superseded.contains(new Revision(get(r, "id"), num(r, "revision"))))
                 .toList();
+    }
+
+    boolean currentClaim(Access ctx, JsonObject row, String at) throws SQLException {
+        var body = parse(get(row, "body"));
+        if (!body.has("assertion")) return true;
+        var a = object(body, "assertion");
+        return timeline(
+                        ctx,
+                        "CITE",
+                        get(a, "subject_id"),
+                        get(a, "predicate"),
+                        at,
+                        store.head(),
+                        "9999-12-31T23:59:59.999999999Z")
+                .stream()
+                .anyMatch(
+                        r ->
+                                get(r, "id").equals(get(row, "id"))
+                                        && num(r, "revision") == num(row, "revision"));
     }
 
     JsonObject recall(JsonObject req) throws SQLException {
@@ -309,7 +370,7 @@ ORDER BY v.seq DESC""",
             rows = timeline(ctx, use, text(req, "subject_id", 256), predicate, at, known, before);
         } else {
             if (req.has("predicate")) throw invalid("predicate");
-            rows = search(ctx, purpose, query, req, known, before, limit);
+            rows = search(ctx, purpose, query, req, known, before, at, limit);
         }
         var items = new JsonArray();
         boolean direct = false;
@@ -319,7 +380,7 @@ ORDER BY v.seq DESC""",
         var timelines = new HashMap<List<String>, List<JsonObject>>();
         var identities = new HashSet<String>();
         for (var row : rows) {
-            JsonObject result = item(ctx, row, purpose, use, 0, 2048, "L1");
+            JsonObject result = item(ctx, row, purpose, use, 0, 2048, "L1", at);
             if (purpose.equals("SELF_IDENTITY")) identities.add(get(result, "text"));
             if (result.has("assertion")) {
                 var a = object(result, "assertion");
@@ -375,12 +436,16 @@ ORDER BY v.seq DESC""",
             JsonObject req,
             long known,
             String before,
+            String at,
             int limit)
             throws SQLException {
         boolean historic = req.has("as_of_known_seq") || req.has("as_of_valid");
         var args = new ArrayList<Object>();
-        String from = historic ? AT_SEQ : LATEST;
-        if (historic) args.add(known);
+        boolean expanded = mode != CellSearch.Mode.LEXICAL && purpose.equals("HISTORY") && !req.has("action_id");
+        boolean past = req.has("as_of_known_seq") && known < store.head();
+        boolean slice = expanded ? past : historic;
+        String from = slice ? AT_SEQ : LATEST;
+        if (slice) args.add(known);
         String where =
                 " WHERE "
                         + allowed(ctx, purpose, use(req, purpose), args)
@@ -391,6 +456,53 @@ ORDER BY v.seq DESC""",
             args.add(text(req, "action_id", 256));
         }
         boolean lexical = !purpose.equals("SELF_IDENTITY") && !req.has("action_id");
+        if (purpose.equals("HISTORY") && !req.has("action_id")) {
+            where +=
+                    " AND (json_extract(v.body,'$.assertion.valid_until') IS NULL OR"
+                            + " json_extract(v.body,'$.assertion.valid_until')>?)";
+            args.add(at);
+            where +=
+                    """
+AND (json_type(v.body,'$.source_refs') IS NULL OR NOT EXISTS (
+  SELECT 1 FROM evidence_dependencies d JOIN revisions dep
+  ON dep.record_id=d.source AND dep.revision=d.revision
+  WHERE d.derived=r.id AND json_extract(dep.body,'$.assertion.valid_until')<=?)) """;
+            args.add(at);
+            if (req.has("as_of_valid")) {
+                // Exclude future and superseded claims before the candidate limit. A successor must
+                // itself be visible to this audience at the requested knowledge watermark.
+                String successor = past ? AT_SEQ : LATEST;
+                args.add(at);
+                if (past) args.add(known);
+                args.add(at);
+                args.add(before);
+                String readable = allowed(ctx, purpose, use(req, purpose), args);
+                where +=
+                        " AND (json_type(v.body,'$.assertion') IS NULL OR EXISTS (SELECT 1 FROM"
+                            + " claim_times active WHERE active.record_id=r.id AND"
+                            + " active.revision=v.revision AND active.effective_utc<=? AND NOT"
+                            + " EXISTS ("
+                                + successor
+                                + " JOIN claim_times c ON c.record_id=r.id AND"
+                                + " c.revision=v.revision WHERE c.previous_id=active.record_id AND"
+                                + " c.previous_revision=active.revision AND c.effective_utc<=? AND"
+                                + " v.occurred<? AND r.status='ONLINE' AND "
+                                + readable
+                                + ")))";
+            }
+            if (expanded) {
+                return new CellSearch(store)
+                        .rank(
+                                from,
+                                where,
+                                args,
+                                past,
+                                query,
+                                mode,
+                                get(req, "profile").equals("THINKING"),
+                                limit);
+            }
+        }
         if (lexical && !historic) {
             String expression = Terms.expression(query);
             if (expression.isEmpty()) return List.of();

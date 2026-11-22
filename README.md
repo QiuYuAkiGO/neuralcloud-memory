@@ -76,3 +76,22 @@ python -u tests/stage2.py --harness ../neuralcloud-harness --gemini
 ## 接口与证据
 
 八个首版接口使用同一 Bearer 凭据。写入以 `(source_instance, event_id)` 幂等。事项的显式替代关系、生效时间和修订历史用于区分原安排与现安排。更正或撤回在同一事务中使派生内容失效。`stream_id` 与 `read_seq` 随每次读取交付给 Harness，供下轮刷新和动作前复核使用。[v2 OpenAPI](contracts/v2/openapi.json) · [会议请求与响应](contracts/v2/examples/meeting.json) · [v1 对照样本](contracts/v2/examples/v1-replay.json)
+
+
+## 阶段 3、4 的配置与回放
+
+Memory 默认使用 `retrievalMode=CELLS`，后台整理间隔默认为 30 秒。在配有单一 llama.cpp Master 的 Harness 客户端配置中设置 `hotIndexTokens=96`，可启用按实际分词计数的常驻人物、事项和期限目录。通过 `POST /v2/cards` 读取 L0 或 L1，再用带版本的来源引用读取 L2。原作者的跨会话引用授权同样约束目录与摘要。[字段和生效时间规则](docs/proposals/neuralcloud-memory-v2-architecture-and-data-contracts.md)
+
+首次复跑时，在忽略目录构建已验证的阶段 1 历史版本。两个工作树可在后续回放复用。
+
+```powershell
+git worktree add --detach target/stage34-baseline/memory 711768ccc3da2243139ea0a72d45d894e247ff43
+git -C ../neuralcloud-harness worktree add --detach ../neuralcloud-memory/target/stage34-baseline/harness 94bffbcccb30745e4d3b4839b61b03cf8403e531
+mvn -B -ntp -f target/stage34-baseline/memory/pom.xml verify
+mvn -B -ntp -f target/stage34-baseline/harness/java/pom.xml verify
+python -X utf8 -u tests/stage3.py --chat --gate
+python -X utf8 -u tests/stage4.py
+python -X utf8 -u tests/gemini_meeting.py --max-output-tokens 4096
+```
+
+P3 在两个阶段使用相同语料和本地模型边界测量首字延迟。P4 的正式 Master 回放使用本机 `127.0.0.1:18081` 的 Qwen；真实会议回放使用已配置的 Gemini。结果、逐题来源和本轮配置决策见[阶段三、四验收报告](docs/acceptance/memory-v2-stage-3-4.md)。

@@ -45,10 +45,34 @@ final class Store implements AutoCloseable {
                         .isEmpty()) throw new IOException("unrecognized existing database");
                 schema("/schema.sql");
                 update("INSERT INTO meta VALUES(?,?)", character, UUID.randomUUID().toString());
-            } else if (version != 2 && version != 3)
+            } else if (version < 2 || version > 4)
                 throw new IOException("unsupported schema version " + version);
             // 旧库原地增加授权索引，保留原有流标识、版本与消费水位。
             if (version < 3) schema("/visibility.sql");
+            if (version < 4) {
+                schema("/catalog.sql");
+                try (var query =
+                                db.prepareStatement(
+                                        "SELECT record_id,revision,body FROM revisions WHERE"
+                                            + " json_type(body,'$.assertion')='object'");
+                        var history = query.executeQuery()) {
+                    while (history.next())
+                        indexClaim(
+                                history.getString(1),
+                                history.getLong(2),
+                                object(parse(history.getString(3)), "assertion"));
+                }
+                // 新词表在启动事务中补齐旧库；卡目录有单独水位，可在服务就绪后增量追赶。
+                try (var query =
+                                db.prepareStatement(
+                                        "SELECT r.id,v.body FROM records r JOIN revisions v ON"
+                                            + " v.record_id=r.id AND v.revision=r.revision WHERE"
+                                            + " r.status='ONLINE'");
+                        var records = query.executeQuery()) {
+                    while (records.next())
+                        CellSearch.index(this, records.getString(1), parse(records.getString(2)));
+                }
+            }
             var metadata = rows("SELECT * FROM meta").getFirst();
             if (!character.equals(get(metadata, "character_id")))
                 throw new IOException("character_id mismatch");
@@ -95,17 +119,20 @@ final class Store implements AutoCloseable {
     }
 
     List<JsonObject> rows(String sql, Object... args) throws SQLException {
-        try (var p = prepare(sql, args);
-                var rs = p.executeQuery()) {
-            var out = new ArrayList<JsonObject>();
+        var out = new ArrayList<JsonObject>();
+        scan(sql, out::add, args);
+        return out;
+    }
+
+    void scan(String sql, java.util.function.Consumer<JsonObject> consumer, Object... args) throws SQLException {
+        try (var p = prepare(sql,args); var rs = p.executeQuery()) {
             var md = rs.getMetaData();
             while (rs.next()) {
                 var row = new JsonObject();
                 for (int i = 1; i <= md.getColumnCount(); i++)
                     row.add(md.getColumnLabel(i), JSON.toJsonTree(rs.getObject(i)));
-                out.add(row);
+                consumer.accept(row);
             }
-            return out;
         }
     }
 
@@ -113,6 +140,17 @@ final class Store implements AutoCloseable {
         try (var p = prepare(sql, args)) {
             p.executeUpdate();
         }
+    }
+
+    void indexClaim(String id, long revision, JsonObject assertion) throws SQLException {
+        var prior = assertion.getAsJsonObject("supersedes_ref");
+        update(
+                "INSERT INTO claim_times VALUES(?,?,?,?,?)",
+                id,
+                revision,
+                time(assertion, "effective_at"),
+                prior == null ? null : get(prior, "record_id"),
+                prior == null ? null : num(prior, "revision"));
     }
 
     long head() throws SQLException {

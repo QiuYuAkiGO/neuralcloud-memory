@@ -20,7 +20,8 @@ final class Ledger {
         if (!source.equals(store.writer)) throw denied();
         var rows =
                 store.rows(
-                        "SELECT record_id,revision,seq,grant_id FROM receipts WHERE source=? AND event=?",
+                        "SELECT record_id,revision,seq,grant_id FROM receipts WHERE source=? AND"
+                                + " event=?",
                         source,
                         event);
         if (rows.isEmpty()) return obj("status", "NOT_FOUND");
@@ -87,8 +88,13 @@ final class Ledger {
 
     private String insert(Access ctx, JsonObject cmd, boolean candidate) throws SQLException {
         String base = "kind content occurred_at speaker source_venue privacy";
-        if (candidate) keys(cmd, COMMAND + base + " source_refs author");
-        else keys(cmd, COMMAND + base + " channel action_id assertion identity source_refs");
+        if (candidate) keys(cmd, COMMAND + base + " source_refs author topic replaces_impression");
+        else
+            keys(
+                    cmd,
+                    COMMAND
+                            + base
+                            + " channel action_id assertion identity source_refs topic reply_to");
         String kind =
                 candidate
                         ? one(cmd, "kind", "summary", "impression")
@@ -109,6 +115,14 @@ final class Ledger {
         if (cmd.has("privacy")) one(cmd, "privacy", "public", "private", "sensitive");
         else body.addProperty("privacy", "private");
         for (String key : List.of("speaker", "source_venue")) if (cmd.has(key)) text(cmd, key, 256);
+        if (cmd.has("topic")) {
+            if (!candidate && !kind.equals("observation")) throw invalid("topic");
+            text(cmd, "topic", 128);
+        }
+        if (cmd.has("reply_to")) {
+            if (!kind.equals("observation")) throw invalid("reply_to");
+            validateReply(ctx, object(cmd, "reply_to"), null);
+        }
         if (candidate) {
             String author = text(cmd, "author", 128);
             if (kind.equals("impression") && !author.equals("MASTER")) throw denied();
@@ -151,6 +165,17 @@ final class Ledger {
                     if (row == null
                             || !get(row, "status").equals("ONLINE")
                             || num(row, "revision") != expected) throw conflict("SOURCE_CHANGED");
+                    if (cmd.has("replaces_impression")
+                            && (!Set.of(
+                                                    "observation",
+                                                    "self_expression",
+                                                    "tool_attempt",
+                                                    "tool_result",
+                                                    "delivery_receipt")
+                                            .contains(get(row, "kind"))
+                                    || !new Reader(store).currentClaim(ctx, row, utc(Instant.now()))
+                                    || parse(get(row, "body")).has("source_refs")))
+                        throw conflict("SOURCE_CHANGED");
                     if ("sensitive".equals(get(parse(get(row, "body")), "privacy"))) {
                         if (ctx.peer() != null) throw denied();
                         body.addProperty("privacy", "sensitive");
@@ -165,6 +190,36 @@ final class Ledger {
                 // 已送达的渠道正文如实入账。即使在写回之前撤权，此依赖也会阻止再次交付旧正文。
                 store.update("INSERT OR IGNORE INTO sources VALUES(?,?,?)", id, rid, expected);
             }
+        }
+        if (cmd.has("replaces_impression")) {
+            if (!kind.equals("impression") || !ctx.role().equals("ORCHESTRATOR")) throw denied();
+            var old = object(cmd, "replaces_impression");
+            keys(old, "record_id revision");
+            String oldId = id(old, "record_id");
+            var prior = current(ctx.scope(), oldId);
+            long expected = number(old, "revision", 1, Long.MAX_VALUE);
+            if (prior == null
+                    || !get(prior, "kind").equals("impression")
+                    || !Set.of("ONLINE", "SOURCE_CHANGED").contains(get(prior, "status"))
+                    || num(prior, "revision") != expected
+                    || !store.rows(
+                                    "SELECT 1 FROM evidence_dependencies WHERE derived=? AND"
+                                            + " source=?",
+                                    id,
+                                    oldId)
+                            .isEmpty()) throw conflict("SOURCE_CHANGED");
+            // The replacement, its new verified leaves and retirement of dependent summaries commit
+            // together.
+            var visible = new Reader(store).currentFor(ctx, "CITE", oldId);
+            if (visible == null) throw conflict("SOURCE_CHANGED");
+            var oldBody = parse(get(prior, "body"));
+            if ("sensitive".equals(get(oldBody, "privacy"))) {
+                if (ctx.peer() != null) throw denied();
+                body.addProperty("privacy", "sensitive");
+            }
+            if (get(prior, "status").equals("ONLINE") && !body.has("topic") && oldBody.has("topic"))
+                body.add("topic", oldBody.get("topic"));
+            retire(prior, oldId);
         }
         version(id, 1, occurred, body, candidate ? "CANDIDATE" : "INGEST");
         notifyPredecessors(body, null);
@@ -187,11 +242,24 @@ final class Ledger {
         } else if (!scope.matches("group:onebot:" + account + ":[1-9][0-9]*")) throw denied();
     }
 
+    private void validateReply(Access ctx, JsonObject parent, String ownId) throws SQLException {
+        keys(parent, "record_id revision");
+        String parentId = id(parent, "record_id");
+        var row = current(ctx.scope(), parentId);
+        long revision = number(parent, "revision", 1, Long.MAX_VALUE);
+        if (parentId.equals(ownId)
+                || row == null
+                || !get(row, "status").equals("ONLINE")
+                || num(row, "revision") != revision) throw conflict("SOURCE_CHANGED");
+    }
+
     private void validateAssertion(Access ctx, JsonObject a, String ownId) throws SQLException {
-        keys(a, "subject_id predicate value effective_at supersedes_ref");
+        keys(a, "subject_id predicate value effective_at supersedes_ref valid_until");
         String subject = text(a, "subject_id", 256), predicate = text(a, "predicate", 128);
         text(a, "value", 2048);
         String effective = time(a, "effective_at");
+        if (a.has("valid_until") && time(a, "valid_until").compareTo(effective) <= 0)
+            throw invalid("valid_until");
         if (predicate.equals("scheduled_for")) time(a, "value");
         if (!a.has("supersedes_ref")) return;
         var ref = object(a, "supersedes_ref");
@@ -213,7 +281,11 @@ final class Ledger {
     }
 
     private String correct(Access ctx, JsonObject cmd) throws SQLException {
-        keys(cmd, COMMAND + "record_id expected_revision operation reason content assertion");
+        keys(
+                cmd,
+                COMMAND
+                        + "record_id expected_revision operation reason content assertion topic"
+                        + " reply_to");
         String id = id(cmd, "record_id"), op = one(cmd, "operation", "REPLACE", "RETRACT");
         text(cmd, "reason", 1024);
         long expected = number(cmd, "expected_revision", 1, Long.MAX_VALUE);
@@ -229,13 +301,30 @@ final class Ledger {
         body.remove("identity");
         if (op.equals("REPLACE")) {
             body.addProperty("content", text(cmd, "content", 32768));
+            for (String key : List.of("topic", "reply_to")) {
+                if (!cmd.has(key)) continue;
+                String kind = get(old, "kind");
+                if (!kind.equals("observation")
+                        && !(key.equals("topic") && Set.of("impression", "summary").contains(kind)))
+                    throw invalid(key);
+                if (cmd.get(key).isJsonNull()) {
+                    body.remove(key);
+                    continue;
+                }
+                if (key.equals("topic")) text(cmd, key, 128);
+                else validateReply(ctx, object(cmd, key), id);
+                body.add(key, cmd.get(key));
+            }
             if (cmd.has("assertion")) {
                 if (!get(old, "kind").equals("observation")) throw invalid("assertion");
                 validateAssertion(ctx, object(cmd, "assertion"), id);
                 body.add("assertion", cmd.get("assertion"));
             }
         } else {
-            if (cmd.has("content") || cmd.has("assertion")) throw invalid("operation");
+            if (cmd.has("content")
+                    || cmd.has("assertion")
+                    || cmd.has("topic")
+                    || cmd.has("reply_to")) throw invalid("operation");
             body.addProperty("content", "");
         }
         store.update(
@@ -244,8 +333,25 @@ final class Ledger {
                 op.equals("RETRACT") ? "RETRACTED" : "ONLINE",
                 id);
         store.update(
-                "UPDATE visibility_grants SET status='SOURCE_CHANGED' WHERE record_id=? AND status='ACTIVE'",
+                "UPDATE visibility_grants SET status='SOURCE_CHANGED' WHERE record_id=? AND"
+                        + " status='ACTIVE'",
                 id);
+        invalidateDescendants(id);
+        version(id, expected + 1, get(old, "occurred"), body, op);
+        notifyPredecessors(previousBody, body);
+        return id;
+    }
+
+    private void retire(JsonObject old, String id) throws SQLException {
+        long revision = num(old, "revision") + 1;
+        var body = parse(get(old, "body"));
+        body.addProperty("content", "");
+        store.update("UPDATE records SET status='RETRACTED',revision=? WHERE id=?", revision, id);
+        invalidateDescendants(id);
+        version(id, revision, get(old, "occurred"), body, "RETRACT");
+    }
+
+    private void invalidateDescendants(String id) throws SQLException {
         // Invalidate descendants in the same transaction. Their own revision can remain unchanged.
         var dependents =
                 store.rows(
@@ -260,9 +366,6 @@ SELECT r.id,r.revision FROM records r JOIN deps USING(id) WHERE status='ONLINE'"
             unindex(affected);
             change(affected, num(dep, "revision"), "SOURCE_CHANGED");
         }
-        version(id, expected + 1, get(old, "occurred"), body, op);
-        notifyPredecessors(previousBody, body);
-        return id;
     }
 
     // A later announcement preserves the old transcript but changes its schedule's validity.
@@ -300,11 +403,17 @@ WHERE r.conversation=? AND r.id=?""",
     }
 
     private void unindex(String id) throws SQLException {
+        store.update(
+                "DELETE FROM cell_search WHERE rowid=(SELECT rowid FROM records WHERE id=?)", id);
         store.update("DELETE FROM search WHERE rowid=(SELECT rowid FROM records WHERE id=?)", id);
     }
 
     private void version(String id, long rev, String occurred, JsonObject body, String op)
             throws SQLException {
+        if (body.has("assertion") && object(body, "assertion").has("valid_until")) {
+            var assertion = object(body, "assertion");
+            assertion.addProperty("valid_until", time(assertion, "valid_until"));
+        }
         change(id, rev, op);
         store.update(
                 "INSERT INTO revisions VALUES(?,?,?,?,?)",
@@ -313,8 +422,10 @@ WHERE r.conversation=? AND r.id=?""",
                 store.head(),
                 occurred,
                 JSON.toJson(body));
+        if (body.has("assertion")) store.indexClaim(id, rev, object(body, "assertion"));
         unindex(id);
         if (!op.equals("RETRACT")) {
+            CellSearch.index(store, id, body);
             String searchable = get(body, "content");
             for (String k : List.of("speaker", "action_id"))
                 if (body.has(k)) searchable += " " + get(body, k);

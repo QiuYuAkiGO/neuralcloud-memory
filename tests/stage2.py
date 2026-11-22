@@ -246,6 +246,7 @@ class Case:
         card = event(
             "team-card",
             "例会卡片：雪松厅。",
+            topic="雪松会场卡",
             scope=TEAM,
             kind="summary",
             author="MASTER",
@@ -253,6 +254,11 @@ class Case:
         )
         published = ref(r.api("candidates", card))
         assert self.read(published, TEAM)["text"] == card["content"]
+        r.api("organize",dict(context=audience(TEAM,"ORCHESTRATOR"),limit=256))
+        directory=dict(context=audience(TEAM),view="L0",limit=32)
+        detail=dict(context=audience(TEAM),view="L1",axis="SUBJECT",title="雪松会场卡",limit=4)
+        assert "雪松会场卡" in serialized(r.api("cards",directory))
+        assert r.api("cards",detail)["items"][0]["items"][0]["grant_dependent"]
         assert (
             r.api("candidates", dict(card, event_id="private-card", source_refs=[group, private_reason]), 409)[
                 "code"
@@ -268,6 +274,7 @@ class Case:
         echoed = dict(record_id=held["recordId"], revision=held["revision"])
         assert self.read(echoed, TEAM)["grant_dependent"]
         self.revoke(console_grant)
+        assert "雪松会场卡" not in serialized(r.api("cards",directory)) and not r.api("cards",detail)["items"]
         for candidate in (group, published, echoed):
             assert self.read(candidate, TEAM)["status"] == "NOT_FOUND"
         assert self.read(group, target)["text"] == notice

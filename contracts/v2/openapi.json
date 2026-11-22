@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "NeuralCloud Memory",
-    "version": "2.1.0"
+    "version": "2.2.0"
   },
   "security": [
     {
@@ -953,6 +953,180 @@
           }
         ]
       }
+    },
+    "/v2/cards": {
+      "post": {
+        "operationId": "cards",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CardQuery"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Cards"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body too large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid field",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Storage unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/organize": {
+      "post": {
+        "operationId": "organize",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Organize"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Organized"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body too large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid field",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Storage unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1074,6 +1248,11 @@
           },
           "supersedes_ref": {
             "$ref": "#/components/schemas/RecordRef"
+          },
+          "valid_until": {
+            "type": "string",
+            "format": "date-time",
+            "description": "排他的业务时间上界，必须晚于 effective_at。"
           }
         },
         "required": [
@@ -1219,6 +1398,14 @@
             },
             "minItems": 1,
             "maxItems": 128
+          },
+          "topic": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "reply_to": {
+            "$ref": "#/components/schemas/RecordRef"
           }
         },
         "required": [
@@ -1241,6 +1428,29 @@
               "properties": {
                 "kind": {
                   "const": "self_expression"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "anyOf": [
+                {
+                  "required": [
+                    "topic"
+                  ]
+                },
+                {
+                  "required": [
+                    "reply_to"
+                  ]
+                }
+              ]
+            },
+            "then": {
+              "properties": {
+                "kind": {
+                  "const": "observation"
                 }
               }
             }
@@ -1310,6 +1520,14 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 128
+          },
+          "topic": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "replaces_impression": {
+            "$ref": "#/components/schemas/RecordRef"
           }
         },
         "required": [
@@ -1321,6 +1539,25 @@
           "kind",
           "source_refs",
           "author"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "required": [
+                "replaces_impression"
+              ]
+            },
+            "then": {
+              "properties": {
+                "author": {
+                  "const": "MASTER"
+                },
+                "kind": {
+                  "const": "impression"
+                }
+              }
+            }
+          }
         ]
       },
       "Correction": {
@@ -1368,6 +1605,28 @@
           },
           "assertion": {
             "$ref": "#/components/schemas/Assertion"
+          },
+          "topic": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reply_to": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RecordRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -1379,7 +1638,32 @@
           "operation",
           "reason"
         ],
-        "description": "REPLACE 要求 content，可重新提供结构化 assertion。RETRACT 不接收 content 或 assertion。"
+        "description": "REPLACE 要求 content，可重新提供结构化 assertion。RETRACT 不接收 content 或 assertion。",
+        "allOf": [
+          {
+            "if": {
+              "anyOf": [
+                {
+                  "required": [
+                    "topic"
+                  ]
+                },
+                {
+                  "required": [
+                    "reply_to"
+                  ]
+                }
+              ]
+            },
+            "then": {
+              "properties": {
+                "operation": {
+                  "const": "REPLACE"
+                }
+              }
+            }
+          }
+        ]
       },
       "Receipt": {
         "type": "object",
@@ -1701,6 +1985,25 @@
               },
               "grant_dependent": {
                 "const": true
+              },
+              "resolved_dates": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "format": "date"
+                }
+              },
+              "topic": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "evidence_valid_until": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "evidence_active": {
+                "type": "boolean"
               }
             },
             "required": [
@@ -1916,6 +2219,15 @@
               "minLength": 1,
               "maxLength": 128
             }
+          },
+          "retrieval_mode": {
+            "type": "string",
+            "enum": [
+              "LEXICAL",
+              "CELLS",
+              "TEMPORAL",
+              "HYBRID"
+            ]
           }
         },
         "required": [
@@ -2078,6 +2390,216 @@
           "source_instance",
           "event_id",
           "reason"
+        ]
+      },
+      "CardQuery": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "context": {
+            "$ref": "#/components/schemas/Context"
+          },
+          "view": {
+            "type": "string",
+            "enum": [
+              "L0",
+              "L1"
+            ]
+          },
+          "axis": {
+            "type": "string",
+            "enum": [
+              "PERSON",
+              "SUBJECT"
+            ]
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 32
+          }
+        },
+        "required": [
+          "context",
+          "view",
+          "limit"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "view": {
+                  "const": "L1"
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "axis",
+                "title"
+              ]
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "title"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "CardEntry": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "axis": {
+            "type": "string",
+            "enum": [
+              "PERSON",
+              "SUBJECT"
+            ]
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "priority": {
+            "type": "string",
+            "enum": [
+              "OPEN",
+              "CARD"
+            ]
+          },
+          "ref": {
+            "$ref": "#/components/schemas/RecordRef"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Item"
+            }
+          },
+          "source_refs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RecordRef"
+            },
+            "uniqueItems": true
+          },
+          "source_count": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "valid_until": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "deadline": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          }
+        },
+        "required": [
+          "axis",
+          "title",
+          "priority",
+          "ref"
+        ],
+        "dependentRequired": {
+          "items": [
+            "source_refs",
+            "source_count"
+          ],
+          "source_refs": [
+            "items",
+            "source_count"
+          ]
+        }
+      },
+      "Cards": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "stream_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "read_seq": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CardEntry"
+            }
+          },
+          "organized_seq": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "stream_id",
+          "read_seq",
+          "organized_seq",
+          "items"
+        ]
+      },
+      "Organize": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "context": {
+            "$ref": "#/components/schemas/Context"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 256
+          }
+        },
+        "required": [
+          "context",
+          "limit"
+        ]
+      },
+      "Organized": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "stream_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "read_seq": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "organized_seq": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "processed": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 256
+          }
+        },
+        "required": [
+          "stream_id",
+          "read_seq",
+          "organized_seq",
+          "processed"
         ]
       }
     }

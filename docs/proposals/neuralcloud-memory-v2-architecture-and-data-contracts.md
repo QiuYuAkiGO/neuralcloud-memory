@@ -179,6 +179,32 @@ Worker 的登记至少保留到实例结束。未完任务交接时，新实例�
 
 **资源和产品决策。** 联调按现有 0.8B Router 和 27B Master 配置记录，目标 9B 单独复测。检索收益和资源预算在固定数据规模、模型版本、并发与冷热缓存条件下报告。阶段 2 采用经渠道认证的原作者授权与撤销，服务凭据与渠道决策凭据分开配置。阶段 3、4 的精排开关、热索引 token 上限和整理间隔以本机验收数据确定。
 
+## 7. P3、P4 已实现的数据契约
+
+协议小版本为 2.2，服务仍在 `/v2` 提供 HTTP 接口。SQLite schema 4 迁移在同一事务内保留原始记录、修订、回执、授权和流身份，补建当前检索词表与历史修订的生效时间索引。卡目录从水位 0 分页追赶。健康响应的 `retrieval_mode` 公布当前检索模式，`audience_cards` 表示服务支持按受众读取卡片。[OpenAPI](../../contracts/v2/openapi.json)
+
+### 7.1 发言、事件与时间
+
+- 渠道或控制台可给 `observation` 附加 `topic` 与 `reply_to`。后者必须指向同一会话的一条在线原文的确切版本。每一跳都复核版本、受众和查询时点。编辑正文时，省略这两个字段保留已有凭据，传入新值替换，显式传 `null` 清除。派生候选也可声明事项名。检索结果始终逐条返回原作者、场合和版本。
+- `assertion` 可给出排他上界 `valid_until`，必须晚于 `effective_at`。业务时间采用左闭右开区间，`as_of_known_seq` 决定当时已入账的版本，`before` 限定原发言时间。显式替代永久终止已被替代的旧事实，替代项期满后可出现空窗。原渠道撤回及现有授权约束适用于历史读取。
+- `resolved_dates` 把“前天、昨天、今天、明天、后天”及“大前天、大后天”锚定到原发言的日历日与原始时区。回答保留带时间的原话。“下次”“晚点”等表达保留原文供模型查证。带期限的已发回复和派生材料沿版本依赖继承最早上界，通过 `evidence_valid_until`、`evidence_active` 标识。L2 可查证历史，当前检索与常驻目录排除过期材料。
+- Memory 的 `retrievalMode` 可取 `LEXICAL`、`CELLS`、`TEMPORAL`、`HYBRID`。默认 `CELLS` 在受众内选择候选并扩展最多两跳。`TEMPORAL` 另把归一日期加入检索，`HYBRID` 在同一候选窗内融合同一语料的稀疏 TF-IDF 余弦与词法排序，RRF 常数为 60。扩展模式下显式 `profile=THINKING` 可按原文连续匹配再排序。Harness 默认 `historyProfile=QUICK`，可显式设为 `THINKING` 比较正式会话的精排延迟。本人身份与本人历史保留各自的读取契约。
+- `limit` 限定实际返回窗口。当前词表取至多该数量的起点，每跳检查至多同样数量的邻接记录；合并去重后在该窗口内融合或精排。查询旧知识水位时扫描当时可见的修订，用定长队列保留起点。工作量与返回条数在验收报告中分别说明。
+
+### 7.2 人物卡、事项卡与后台整理
+
+| 入口 | 已实现的语义 |
+| --- | --- |
+| `POST /v2/cards`，`view=L0` | `axis` 可选 `PERSON` 或 `SUBJECT`。返回受众当前可引用的标题、优先级和 `ref`。未决承诺和期限排在其他事项之前，存在时附 `valid_until` 及原文声明的 `deadline`。 |
+| `POST /v2/cards`，`view=L1` | 同时提供 `axis` 和 `title`。返回至多 `limit` 个带版本、实际作者和来源的摘录。每条限 320 个 Unicode 码点。卡级 `source_refs` 与 `source_count` 只计不同的叶子证据。 |
+| `POST /v2/read`，L2 | 用上述引用精确读取原文窗口。每次均重新核对当前可见性。跨会话内容需要原作者授予目标会话 `CITE` 才能进入卡片。 |
+| `POST /v2/organize` | 由 `ORCHESTRATOR` 提交 `limit=1…256`。卡指针更新和消费水位一起提交，返回 `organized_seq`、`read_seq` 和实际处理条数；无新增事件时同样按页清理已到期指针。 |
+| `POST /v2/candidates` | Master 修订使用 `kind=impression`、`author=MASTER`、`replaces_impression` 及一组新证据版本。宿主以 `ORCHESTRATOR` 提交。旧印象退役、其下游失效、新印象与持久回执原子提交。 |
+
+人物来自发言人字段；事项来自显式标题或断言主题。目录只存原文指针，查询时复核来源链。新资料在目录追上之前可走原文检索。Memory 默认每 30 秒最多处理 16 条变更，`organizeIntervalSeconds=0` 只禁用定时任务。人物名、标题和外部发言均按引用数据进入模型。
+
+Harness 的 v2 scoped 客户端可配置 `hotIndexTokens`。通用配置缺省为 0，验收的本机 Master 使用 96。每次请求重建目录，用同一推理服务实际托管的模型和分词器计算整个文本块及分隔符。预算不包括用户问题、固定系统提示和按需查询的证据。分词服务不可用时记录审计事件并继续按需查证。真实模型输入单独登记材料、版本和交付状态。控制台向 Master 发送 `/memory revise 旧印象ID@版本 来源ID@版本 [更多来源]` 可基于 1–16 条原文修订印象。命令只能由本轮控制台输入触发。每次修订保留新旧引用和回执。[阶段三、四验收报告](../acceptance/memory-v2-stage-3-4.md)
+
 [h-openapi]: https://github.com/QiuYuAkiGO/neuralcloud-harness/blob/3db18942d34c963ec35dcd774b05363d4a2cfb25/contracts/resident/v1/openapi.v1.json
 [h-client]: https://github.com/QiuYuAkiGO/neuralcloud-harness/blob/3db18942d34c963ec35dcd774b05363d4a2cfb25/java/src/main/java/neuralcloud/controlplane/memory/ResidentMemory.java
 [h-writer]: https://github.com/QiuYuAkiGO/neuralcloud-harness/blob/3db18942d34c963ec35dcd774b05363d4a2cfb25/java/src/main/java/neuralcloud/controlplane/router/RouterMemoryWriter.java
