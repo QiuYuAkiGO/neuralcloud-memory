@@ -1,0 +1,37 @@
+{
+  "legacy_commit": "1c44702af88ec991f3813f18fbf8cc1358dadc9e",
+  "legacy_event": {
+    "character_id": "misty-dev",
+    "source_instance": "neuralcloud-java",
+    "event_id": "中文\"🗓 换行\\x",
+    "session_id": "console:golden",
+    "conversation_id": "console:golden",
+    "occurred_at": 1795132800.0,
+    "content": "小林🗓改期"
+  },
+  "ingest": {
+    "context": {
+      "character_id": "misty-dev",
+      "session_id": "console:golden",
+      "conversation_id": "console:golden",
+      "actor_id": "ROUTER",
+      "role": "ROUTER"
+    },
+    "source_instance": "neuralcloud-java",
+    "event_id": "中文\"🗓 换行\\x",
+    "kind": "observation",
+    "occurred_at": "2026-11-20T00:00:00+00:00",
+    "content": "小林🗓改期"
+  },
+  "expected_receipt": {
+    "status": "DURABLE",
+    "seq": 1,
+    "record_id": "792a747bfc370bbf32d289091e2b71e0f0a7e2410c1ad506597bd79058925a12",
+    "revision": 1
+  },
+  "window": {
+    "start": 1,
+    "length": 2,
+    "text": "林🗓"
+  }
+}

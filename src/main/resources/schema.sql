@@ -1,0 +1,11 @@
+CREATE TABLE meta(character_id TEXT PRIMARY KEY, stream_id TEXT UNIQUE NOT NULL);
+CREATE TABLE records(id TEXT PRIMARY KEY, conversation TEXT NOT NULL, owner TEXT NOT NULL, source TEXT NOT NULL, kind TEXT NOT NULL, revision INTEGER NOT NULL, status TEXT NOT NULL);
+CREATE INDEX records_scope ON records(conversation,kind,status);
+CREATE TABLE changes(seq INTEGER PRIMARY KEY AUTOINCREMENT, op TEXT NOT NULL, record_id TEXT NOT NULL REFERENCES records(id), revision INTEGER NOT NULL, recorded_at TEXT NOT NULL);
+CREATE TABLE revisions(record_id TEXT NOT NULL REFERENCES records(id), revision INTEGER NOT NULL, seq INTEGER NOT NULL REFERENCES changes(seq), occurred TEXT NOT NULL, body TEXT NOT NULL, PRIMARY KEY(record_id,revision));
+CREATE INDEX revisions_history ON revisions(record_id,seq);
+CREATE TABLE sources(derived TEXT NOT NULL REFERENCES records(id), source TEXT NOT NULL REFERENCES records(id), revision INTEGER NOT NULL, PRIMARY KEY(derived,source));
+CREATE INDEX sources_reverse ON sources(source,derived);
+CREATE TABLE receipts(source TEXT NOT NULL, event TEXT NOT NULL, op TEXT NOT NULL, command TEXT NOT NULL, record_id TEXT NOT NULL, revision INTEGER NOT NULL, seq INTEGER NOT NULL, PRIMARY KEY(source,event));
+CREATE VIRTUAL TABLE search USING fts5(terms,tokenize='unicode61');
+PRAGMA user_version=2;

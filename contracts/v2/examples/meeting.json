@@ -1,0 +1,123 @@
+{
+  "ingests": [
+    {
+      "context": {
+        "character_id": "misty-dev",
+        "session_id": "console:project",
+        "conversation_id": "console:project",
+        "actor_id": "ROUTER",
+        "role": "ROUTER"
+      },
+      "source_instance": "neuralcloud-java",
+      "event_id": "d0f531c4-1d21-4a35-9bb8-15687e29d954:2",
+      "kind": "observation",
+      "occurred_at": "2026-11-18T09:00:00+08:00",
+      "content": "例会定在周五 15 点。",
+      "speaker": "小林",
+      "source_venue": "项目群",
+      "assertion": {
+        "subject_id": "weekly-review",
+        "predicate": "scheduled_for",
+        "value": "2026-11-20T15:00:00+08:00",
+        "effective_at": "2026-11-18T09:00:00+08:00"
+      }
+    },
+    {
+      "context": {
+        "character_id": "misty-dev",
+        "session_id": "console:project",
+        "conversation_id": "console:project",
+        "actor_id": "ROUTER",
+        "role": "ROUTER"
+      },
+      "source_instance": "neuralcloud-java",
+      "event_id": "d0f531c4-1d21-4a35-9bb8-15687e29d954:23",
+      "kind": "observation",
+      "occurred_at": "2026-11-19T10:00:00+08:00",
+      "content": "例会改到周六 10 点。",
+      "speaker": "小林",
+      "source_venue": "项目群",
+      "assertion": {
+        "subject_id": "weekly-review",
+        "predicate": "scheduled_for",
+        "value": "2026-11-21T10:00:00+08:00",
+        "effective_at": "2026-11-19T10:00:00+08:00",
+        "supersedes_ref": {
+          "record_id": "423f0ebb28999187faf489297d458d41cb58be9ad64149186a43b174cdf290c5",
+          "revision": 1
+        }
+      }
+    }
+  ],
+  "receipts": [
+    {
+      "record_id": "423f0ebb28999187faf489297d458d41cb58be9ad64149186a43b174cdf290c5",
+      "revision": 1,
+      "seq": 2,
+      "status": "DURABLE"
+    },
+    {
+      "record_id": "c9edf2c3d891f91796c97fd1b4de04a9059ae5111ce5a030e24eed5a9765a3a7",
+      "revision": 1,
+      "seq": 7,
+      "status": "DURABLE"
+    }
+  ],
+  "recall_request": {
+    "context": {
+      "character_id": "misty-dev",
+      "session_id": "console:project",
+      "conversation_id": "console:project",
+      "actor_id": "MASTER",
+      "role": "MASTER"
+    },
+    "kind": "HISTORY",
+    "query": "例会",
+    "profile": "QUICK",
+    "limit": 4,
+    "subject_id": "weekly-review"
+  },
+  "recall_response": {
+    "stream_id": "f287771e-cea6-4fd2-be6d-bf325a4566ca",
+    "read_seq": 12,
+    "items": [
+      {
+        "ref": {
+          "record_id": "c9edf2c3d891f91796c97fd1b4de04a9059ae5111ce5a030e24eed5a9765a3a7",
+          "revision": 1
+        },
+        "source_refs": [
+          {
+            "record_id": "c9edf2c3d891f91796c97fd1b4de04a9059ae5111ce5a030e24eed5a9765a3a7",
+            "revision": 1
+          }
+        ],
+        "status": "ONLINE",
+        "kind": "observation",
+        "basis": "direct",
+        "view": "L1",
+        "occurred_at": "2026-11-19T10:00:00+08:00",
+        "citation_scope": "console:project",
+        "speaker": "小林",
+        "source_venue": "项目群",
+        "assertion": {
+          "subject_id": "weekly-review",
+          "predicate": "scheduled_for",
+          "value": "2026-11-21T10:00:00+08:00",
+          "effective_at": "2026-11-19T10:00:00+08:00",
+          "supersedes_ref": {
+            "record_id": "423f0ebb28999187faf489297d458d41cb58be9ad64149186a43b174cdf290c5",
+            "revision": 1
+          }
+        },
+        "text": "例会改到周六 10 点。",
+        "assertion_active": true
+      }
+    ],
+    "assessment": {
+      "state": "DIRECT",
+      "sufficient": true,
+      "absence_confirmed": false
+    }
+  }
+}

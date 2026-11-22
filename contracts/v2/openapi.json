@@ -1,0 +1,1684 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "NeuralCloud Memory",
+    "version": "2.0.0"
+  },
+  "security": [
+    {
+      "harnessBearer": []
+    }
+  ],
+  "paths": {
+    "/v2/ingest": {
+      "post": {
+        "operationId": "ingest",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Ingest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Receipt"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body too large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid field",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Storage unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/candidates": {
+      "post": {
+        "operationId": "candidates",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Candidate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Receipt"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body too large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid field",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Storage unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/corrections": {
+      "post": {
+        "operationId": "corrections",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Correction"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Receipt"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body too large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid field",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Storage unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/recall": {
+      "post": {
+        "operationId": "recall",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Recall"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecallResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body too large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid field",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Storage unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/read": {
+      "post": {
+        "operationId": "read",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Read"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body too large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid field",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Storage unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/health": {
+      "get": {
+        "operationId": "health",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body too large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid field",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Storage unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/receipts": {
+      "get": {
+        "operationId": "receipts",
+        "parameters": [
+          {
+            "name": "source_instance",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "required": true
+          },
+          {
+            "name": "event_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceiptLookup"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body too large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid field",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Storage unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/changes": {
+      "get": {
+        "operationId": "changes",
+        "parameters": [
+          {
+            "name": "stream_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "required": true
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            },
+            "required": true
+          },
+          {
+            "name": "through",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            },
+            "required": false
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 500
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChangePage"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body too large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid field",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Storage unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "harnessBearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Trusted Harness service principal, bound to one character and configured source instance."
+      }
+    },
+    "schemas": {
+      "Context": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "character_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "session_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "conversation_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "actor_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "ROUTER",
+              "MASTER",
+              "TASK_WORKER",
+              "CHAT_WORKER",
+              "ORCHESTRATOR"
+            ]
+          },
+          "qq": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "account_id": {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{4,15}$"
+              },
+              "peer_id": {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{4,15}$"
+              }
+            },
+            "required": [
+              "account_id",
+              "peer_id"
+            ]
+          }
+        },
+        "required": [
+          "character_id",
+          "session_id",
+          "conversation_id",
+          "actor_id",
+          "role"
+        ]
+      },
+      "RecordRef": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "record_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "record_id",
+          "revision"
+        ]
+      },
+      "Assertion": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "subject_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "predicate": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "value": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "effective_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "supersedes_ref": {
+            "$ref": "#/components/schemas/RecordRef"
+          }
+        },
+        "required": [
+          "subject_id",
+          "predicate",
+          "value",
+          "effective_at"
+        ]
+      },
+      "Channel": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "platform": {
+            "type": "string",
+            "enum": [
+              "qq"
+            ]
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "qq_private",
+              "qq_group"
+            ]
+          },
+          "account_id": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]{4,15}$"
+          },
+          "sender_id": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]{4,15}$"
+          },
+          "message_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "conversation_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          }
+        },
+        "required": [
+          "platform",
+          "type",
+          "account_id",
+          "sender_id",
+          "message_id",
+          "conversation_id"
+        ]
+      },
+      "Ingest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "context": {
+            "$ref": "#/components/schemas/Context"
+          },
+          "source_instance": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "event_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "content": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 32768
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "observation",
+              "self_expression",
+              "tool_attempt",
+              "tool_result",
+              "delivery_receipt"
+            ]
+          },
+          "speaker": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "source_venue": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "privacy": {
+            "type": "string",
+            "enum": [
+              "public",
+              "private",
+              "sensitive"
+            ]
+          },
+          "action_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "channel": {
+            "$ref": "#/components/schemas/Channel"
+          },
+          "assertion": {
+            "$ref": "#/components/schemas/Assertion"
+          },
+          "identity": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "account_id": {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{4,15}$"
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              }
+            },
+            "required": [
+              "account_id",
+              "name"
+            ]
+          }
+        },
+        "required": [
+          "context",
+          "source_instance",
+          "event_id",
+          "occurred_at",
+          "content",
+          "kind"
+        ],
+        "description": "工具尝试、执行结果和送达回执要求 action_id。只有 observation 可带 assertion 或经 ORCHESTRATOR 确认的 identity。"
+      },
+      "Candidate": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "context": {
+            "$ref": "#/components/schemas/Context"
+          },
+          "source_instance": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "event_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "content": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 32768
+          },
+          "speaker": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "source_venue": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "privacy": {
+            "type": "string",
+            "enum": [
+              "public",
+              "private",
+              "sensitive"
+            ]
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "summary",
+              "impression"
+            ]
+          },
+          "source_refs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RecordRef"
+            },
+            "minItems": 1,
+            "maxItems": 128
+          },
+          "author": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "required": [
+          "context",
+          "source_instance",
+          "event_id",
+          "occurred_at",
+          "content",
+          "kind",
+          "source_refs",
+          "author"
+        ]
+      },
+      "Correction": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "context": {
+            "$ref": "#/components/schemas/Context"
+          },
+          "source_instance": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "event_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "record_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1
+          },
+          "operation": {
+            "type": "string",
+            "enum": [
+              "REPLACE",
+              "RETRACT"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          },
+          "content": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 32768
+          },
+          "assertion": {
+            "$ref": "#/components/schemas/Assertion"
+          }
+        },
+        "required": [
+          "context",
+          "source_instance",
+          "event_id",
+          "record_id",
+          "expected_revision",
+          "operation",
+          "reason"
+        ],
+        "description": "REPLACE 要求 content，可重新提供结构化 assertion。RETRACT 不接收 content 或 assertion。"
+      },
+      "Receipt": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "DURABLE"
+            ]
+          },
+          "record_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1
+          },
+          "seq": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "status",
+          "record_id",
+          "revision",
+          "seq"
+        ]
+      },
+      "ReceiptLookup": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/Receipt"
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "NOT_FOUND"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          }
+        ]
+      },
+      "Read": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "context": {
+            "$ref": "#/components/schemas/Context"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "HISTORY",
+              "SELF_IDENTITY",
+              "SELF_HISTORY"
+            ]
+          },
+          "targets": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "record_id": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                "revision": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 1
+                }
+              },
+              "required": [
+                "record_id"
+              ]
+            },
+            "minItems": 1,
+            "maxItems": 128
+          },
+          "start": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 2147483647
+          },
+          "length": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 16384
+          }
+        },
+        "required": [
+          "context",
+          "targets"
+        ]
+      },
+      "Recall": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "context": {
+            "$ref": "#/components/schemas/Context"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "HISTORY",
+              "SELF_IDENTITY",
+              "SELF_HISTORY"
+            ]
+          },
+          "query": {
+            "type": "string",
+            "minLength": 0,
+            "maxLength": 256
+          },
+          "profile": {
+            "type": "string",
+            "enum": [
+              "QUICK",
+              "THINKING"
+            ]
+          },
+          "limit": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 50
+          },
+          "subject_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "predicate": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "action_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "as_of_valid": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "as_of_known_seq": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "before": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "context",
+          "kind",
+          "query",
+          "profile",
+          "limit"
+        ],
+        "description": "SELF_IDENTITY 的 query 为空。SELF_HISTORY 绑定入站 QQ 私聊、before 与 1–16 的 limit。before 为排他的发言时间上界。"
+      },
+      "Item": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "ref": {
+                "$ref": "#/components/schemas/RecordRef"
+              },
+              "source_refs": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/RecordRef"
+                },
+                "minItems": 1
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "ONLINE"
+                ]
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "observation",
+                  "self_expression",
+                  "tool_attempt",
+                  "tool_result",
+                  "delivery_receipt",
+                  "summary",
+                  "impression"
+                ]
+              },
+              "basis": {
+                "type": "string",
+                "enum": [
+                  "direct",
+                  "inferred"
+                ]
+              },
+              "view": {
+                "type": "string",
+                "enum": [
+                  "L1",
+                  "L2"
+                ]
+              },
+              "text": {
+                "type": "string",
+                "minLength": 0
+              },
+              "occurred_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "speaker": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "source_venue": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "citation_scope": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "assertion": {
+                "$ref": "#/components/schemas/Assertion"
+              },
+              "assertion_active": {
+                "type": "boolean"
+              },
+              "action_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              }
+            },
+            "required": [
+              "ref",
+              "source_refs",
+              "status",
+              "kind",
+              "basis",
+              "view",
+              "text",
+              "occurred_at",
+              "citation_scope"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "RETRACTED",
+                  "SOURCE_CHANGED",
+                  "INACTIVE",
+                  "ARCHIVED_OFFLINE"
+                ]
+              },
+              "ref": {
+                "$ref": "#/components/schemas/RecordRef"
+              }
+            },
+            "required": [
+              "status",
+              "ref"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "NOT_FOUND"
+                ]
+              },
+              "record_id": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              }
+            },
+            "required": [
+              "status",
+              "record_id"
+            ]
+          }
+        ]
+      },
+      "Assessment": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "DIRECT",
+              "INFERRED",
+              "RELATED",
+              "CONFLICT",
+              "INCOMPLETE",
+              "NOT_FOUND"
+            ]
+          },
+          "sufficient": {
+            "type": "boolean"
+          },
+          "absence_confirmed": {
+            "type": "boolean",
+            "enum": [
+              false
+            ]
+          }
+        },
+        "required": [
+          "state",
+          "sufficient",
+          "absence_confirmed"
+        ]
+      },
+      "ChangePage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "stream_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "through": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "next_after": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "seq": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 1
+                },
+                "op": {
+                  "type": "string",
+                  "enum": [
+                    "INGEST",
+                    "CANDIDATE",
+                    "REPLACE",
+                    "RETRACT",
+                    "SOURCE_CHANGED",
+                    "ASSERTION_UPDATED"
+                  ]
+                },
+                "record_id": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                "revision": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 1
+                }
+              },
+              "required": [
+                "seq",
+                "op",
+                "record_id",
+                "revision"
+              ]
+            }
+          }
+        },
+        "required": [
+          "stream_id",
+          "through",
+          "next_after",
+          "items"
+        ]
+      },
+      "Health": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "api_major": {
+            "type": "integer",
+            "enum": [
+              2
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "TEXT_READY"
+            ]
+          },
+          "character_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "stream_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "head_seq": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        },
+        "required": [
+          "api_major",
+          "status",
+          "character_id",
+          "stream_id",
+          "head_seq",
+          "capabilities"
+        ]
+      },
+      "Error": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "field": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          }
+        },
+        "required": [
+          "code"
+        ]
+      },
+      "ReadResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "stream_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "read_seq": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Item"
+            }
+          }
+        },
+        "required": [
+          "stream_id",
+          "read_seq",
+          "items"
+        ]
+      },
+      "RecallResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "stream_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "read_seq": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Item"
+            }
+          },
+          "assessment": {
+            "$ref": "#/components/schemas/Assessment"
+          }
+        },
+        "required": [
+          "stream_id",
+          "read_seq",
+          "items",
+          "assessment"
+        ]
+      }
+    }
+  }
+}
