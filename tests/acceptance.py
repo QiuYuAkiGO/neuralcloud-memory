@@ -37,13 +37,13 @@ def dump(path, value):
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
-def send(url, body=None, token=None, expected=200):
+def send(url, body=None, token=None, expected=200, timeout=10):
     headers = {"Content-Type": "application/json"}
     if token:
         headers["Authorization"] = "Bearer " + token
     req = Request(url, data=None if body is None else encode(body), headers=headers)
     try:
-        response = OPENER.open(req, timeout=10)
+        response = OPENER.open(req, timeout=timeout)
     except HTTPError as exc:
         response = exc
     with response:
@@ -81,6 +81,17 @@ def stop(proc):
         proc.wait(timeout=15)
 
 
+def apply_reminder(database, command):
+    """The controlled executor commits the requested time before returning its receipt."""
+    with sqlite3.connect(database) as db:
+        db.execute("CREATE TABLE IF NOT EXISTS reminders(action TEXT PRIMARY KEY, title TEXT, scheduled_for TEXT)")
+        db.execute("INSERT OR IGNORE INTO reminders VALUES(?,?,?)",
+                   (command["action_id"], command["title"], command["scheduled_for"]))
+        title, when = db.execute("SELECT title,scheduled_for FROM reminders WHERE action=?",
+                                 (command["action_id"],)).fetchone()
+    return {"action_id":command["action_id"], "status":"APPLIED", "title":title, "scheduled_for":when}
+
+
 class Model(BaseHTTPRequestHandler):
     """Deterministic model boundary. The answer is selected from delivered evidence, never a fixture answer key."""
     def log_message(self, *args):
@@ -103,12 +114,7 @@ class Model(BaseHTTPRequestHandler):
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         if self.path == "/reminders":
-            # A controlled tool commits the external action before issuing its own execution receipt.
-            with sqlite3.connect(self.server.reminders) as db:
-                db.execute("CREATE TABLE IF NOT EXISTS reminders(action TEXT PRIMARY KEY, title TEXT, scheduled_for TEXT)")
-                db.execute("INSERT OR IGNORE INTO reminders VALUES(?,?,?)",(body["action_id"],body["title"],body["scheduled_for"]))
-                title, when = db.execute("SELECT title,scheduled_for FROM reminders WHERE action=?",(body["action_id"],)).fetchone()
-            self.reply({"action_id":body["action_id"],"status":"APPLIED","title":title,"scheduled_for":when})
+            self.reply(apply_reminder(self.server.reminders, body))
             return
         self.server.calls.append(body)
         if "contents" not in body:
@@ -219,8 +225,9 @@ class Relay(BaseHTTPRequestHandler):
     do_GET = do_POST = forward
 
 
-class Run:
-    def __init__(self, harness):
+class ServicePair:
+    """Launch the two official JVM entry points. The caller supplies the Chat Worker configuration."""
+    def __init__(self, harness, *, ports=None, ledger=None, audit_dir=None):
         self.out = ROOT / "target" / "acceptance" / datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
         self.out.mkdir(parents=True)
         self.harness = harness.resolve()
@@ -235,47 +242,26 @@ class Run:
             with ZipFile(self.memjar) as jar:
                 (location / "sqlitejdbc.dll").write_bytes(jar.read("org/sqlite/native/Windows/x86_64/sqlitejdbc.dll"))
             self.native_args.append("-Dorg.sqlite.lib.path=" + str(location))
-        self.proxy, self.http, self.trust = model_boundaries(self.out)
         self.token = secrets.token_urlsafe(36)
-        self.env = dict(os.environ, NC_ACCEPTANCE_TOKEN=self.token, NC_FIXTURE_KEY="fixture-only")
-        self.env["NC_FIXTURE_QQ"] = secrets.token_urlsafe(32)
-        self.onebot = OneBot(self.env["NC_FIXTURE_QQ"])
-        qq_config = props(self.out/"onebot.properties",dict(endpoint=f"ws://127.0.0.1:{self.onebot.port}/",
-                          accountId=12345,allowedUserId=67890,accessTokenEnv="NC_FIXTURE_QQ"))
-        self.port, self.console_port = free_port(), free_port()
+        self.env = dict(os.environ, NC_ACCEPTANCE_TOKEN=self.token)
+        self.harness_env = None
+        self.harness_vm_args = []
+        self.port, self.console_port = ports or (free_port(), free_port())
         self.base = f"http://127.0.0.1:{self.port}/v2/"
         self.console = f"http://127.0.0.1:{self.console_port}/api/"
-        self.relay = ThreadingHTTPServer(("127.0.0.1",0),Relay)
-        self.relay.upstream = self.base[:-4]
-        self.relay.pause_next = self.relay.lose_delivery = False
-        self.relay.snapshot_taken, self.relay.release, self.relay.response_lost = [threading.Event() for _ in range(3)]
-        self.relay.reconciled = []
-        threading.Thread(target=self.relay.serve_forever,daemon=True).start()
-        self.model_base = f"http://127.0.0.1:{self.http.server_port}"
+        self.ledger = ledger or self.out / "ledger"
+        self.audit_dir = audit_dir or self.out / "audit"
+        self.console_config = self.out / "console.properties"
         self.spec = json.loads((ROOT/"contracts/v2/openapi.json").read_text(encoding="utf-8"))
         self.contract_calls = set()
         self.mproc = self.hproc = None
         self.pids, self.results = [], []
-        props(self.out / "memory.properties", dict(port=self.port, dataDirectory="ledger", characterId="misty-dev",
+        props(self.out / "memory.properties", dict(port=self.port, dataDirectory=self.ledger.as_posix(), characterId="misty-dev",
                                                   sourceInstance="neuralcloud-java", accessTokenEnv="NC_ACCEPTANCE_TOKEN"))
         self.client_config = dict(endpoint=self.base[:-3], characterId="misty-dev", accessTokenEnv="NC_ACCEPTANCE_TOKEN",
                                   recallMode="scoped", apiVersion=2)
         self.client = self.out / "client.properties"
         props(self.client, self.client_config)
-        model = props(self.out / "worker.properties", dict(endpoint="https://model.test/v1beta/models/fixture:generateContent",
-                      apiKeyEnv="NC_FIXTURE_KEY", httpVersion="HTTP_1_1", proxy="127.0.0.1:"+str(self.proxy.server_address[1]),
-                      connectTimeoutSeconds=4, requestTimeoutSeconds=8, maxOutputTokens=512, thinkingLevel="LOW",
-                      replyPreferences="classpath:/config/chat-worker-misty-reply-preferences.txt"))
-        llm = props(self.out / "llm.properties", dict(endpoint=self.model_base+"/v1/chat/completions", model="fixture",
-                      httpVersion="HTTP_1_1", enableThinking="false", connectTimeoutSeconds=4, requestTimeoutSeconds=8,
-                      probePrompt="ping", probeMaxTokens=8, probeTemperature=0))
-        self.console_config = self.out / "console.properties"
-        props(self.console_config, dict(listenHost="127.0.0.1", listenPort=self.console_port,
-              auditDirectory=(self.out/"audit").as_posix(), memoryConfig=self.client.as_posix(), chatWorkerConfig=model, openQqConfig=qq_config,
-              chatWorkerRolePrompt="classpath:/config/chat-worker-misty-prompt.txt", routerConfig=llm,
-              routerRolePrompt="classpath:/config/router-role-prompt.txt", routerMetrics=self.model_base+"/metrics",
-              routerMetricsFormat="VLLM", masterConfig=llm, masterMetrics=self.model_base+"/metrics", masterMetricsFormat="VLLM",
-              masterMaxTokens=64, masterTemperature=0, gpuMetrics="NONE", metricsIntervalSeconds=60, metricsTimeoutSeconds=2))
 
     def launch(self, name, args, env=None):
         log = self.out / (name + "-" + str(len(self.pids)) + ".log")
@@ -295,9 +281,9 @@ class Run:
 
     def harness_start(self, failure=None, **settings):
         props(self.client, dict(self.client_config, **settings))
-        args = ["-Djavax.net.ssl.trustStore="+str(self.trust), "-Djavax.net.ssl.trustStorePassword=fixture-only",
+        args = [*self.harness_vm_args,
                 "-cp", str(self.hjar), "neuralcloud.controlplane.app.ConsoleMain", "--config", str(self.console_config)]
-        self.hproc, log = self.launch("harness", args)
+        self.hproc, log = self.launch("harness", args, self.harness_env)
         if failure:
             assert self.hproc.wait(timeout=12) != 0
             assert failure in log.read_text(encoding="utf-8",errors="replace"), log
@@ -316,11 +302,11 @@ class Run:
         self.contract_calls.add(route)
         return result
 
-    def msg(self, chain, text, origin=None):
+    def msg(self, chain, text, origin=None, *, timeout=10):
         body = dict(chain=chain,text=text)
         if origin is not None:
             body["observation"] = origin
-        result = send(self.console+"nodes/chat-worker/messages", body)
+        result = send(self.console+"nodes/chat-worker/messages", body, timeout=timeout)
         assert result["type"] == "chat_worker_reply"
         for _ in range(100):
             audit = self.audit(chain)
@@ -338,6 +324,38 @@ class Run:
     def check(self, name, **detail):
         self.results.append(dict(check=name, **detail))
         print("PASS", name, flush=True)
+
+
+class Run(ServicePair):
+    def __init__(self, harness):
+        super().__init__(harness)
+        self.proxy, self.http, self.trust = model_boundaries(self.out)
+        self.harness_vm_args = ["-Djavax.net.ssl.trustStore="+str(self.trust), "-Djavax.net.ssl.trustStorePassword=fixture-only"]
+        self.env["NC_FIXTURE_KEY"] = "fixture-only"
+        self.env["NC_FIXTURE_QQ"] = secrets.token_urlsafe(32)
+        self.onebot = OneBot(self.env["NC_FIXTURE_QQ"])
+        qq_config = props(self.out/"onebot.properties",dict(endpoint=f"ws://127.0.0.1:{self.onebot.port}/",
+                          accountId=12345,allowedUserId=67890,accessTokenEnv="NC_FIXTURE_QQ"))
+        self.relay = ThreadingHTTPServer(("127.0.0.1",0),Relay)
+        self.relay.upstream = self.base[:-4]
+        self.relay.pause_next = self.relay.lose_delivery = False
+        self.relay.snapshot_taken, self.relay.release, self.relay.response_lost = [threading.Event() for _ in range(3)]
+        self.relay.reconciled = []
+        threading.Thread(target=self.relay.serve_forever,daemon=True).start()
+        self.model_base = f"http://127.0.0.1:{self.http.server_port}"
+        model = props(self.out / "worker.properties", dict(endpoint="https://model.test/v1beta/models/fixture:generateContent",
+                      apiKeyEnv="NC_FIXTURE_KEY", httpVersion="HTTP_1_1", proxy="127.0.0.1:"+str(self.proxy.server_address[1]),
+                      connectTimeoutSeconds=4, requestTimeoutSeconds=8, maxOutputTokens=512, thinkingLevel="LOW",
+                      replyPreferences="classpath:/config/chat-worker-misty-reply-preferences.txt"))
+        llm = props(self.out / "llm.properties", dict(endpoint=self.model_base+"/v1/chat/completions", model="fixture",
+                      httpVersion="HTTP_1_1", enableThinking="false", connectTimeoutSeconds=4, requestTimeoutSeconds=8,
+                      probePrompt="ping", probeMaxTokens=8, probeTemperature=0))
+        props(self.console_config, dict(listenHost="127.0.0.1", listenPort=self.console_port,
+              auditDirectory=(self.out/"audit").as_posix(), memoryConfig=self.client.as_posix(), chatWorkerConfig=model, openQqConfig=qq_config,
+              chatWorkerRolePrompt="classpath:/config/chat-worker-misty-prompt.txt", routerConfig=llm,
+              routerRolePrompt="classpath:/config/router-role-prompt.txt", routerMetrics=self.model_base+"/metrics",
+              routerMetricsFormat="VLLM", masterConfig=llm, masterMetrics=self.model_base+"/metrics", masterMetricsFormat="VLLM",
+              masterMaxTokens=64, masterTemperature=0, gpuMetrics="NONE", metricsIntervalSeconds=60, metricsTimeoutSeconds=2))
 
     def save(self):
         dump(self.out/"model-inputs.json", self.proxy.calls)
