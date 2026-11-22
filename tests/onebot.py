@@ -14,6 +14,9 @@ class OneBot:
         self.ready = threading.Event()
         self.outbound = queue.Queue()
         self.next_id = 7000
+        self.peer = 67890
+        self.expected_peer = self.peer
+        self.deliveries = []
         self.server = serve(self.handle, "127.0.0.1", 0)
         self.port = self.server.socket.getsockname()[1]
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
@@ -27,7 +30,11 @@ class OneBot:
                 if command["action"] == "get_login_info":
                     data = {"user_id": 12345}
                 else:
-                    assert command["action"] == "send_private_msg" and command["params"]["user_id"] == 67890
+                    if command["action"] == "send_private_msg":
+                        assert command["params"]["user_id"] == self.expected_peer
+                    else:
+                        assert command["action"] == "send_group_msg" and command["params"]["group_id"] == 23456
+                    self.deliveries.append(command)
                     self.next_id += 1
                     data = {"message_id": self.next_id}
                 socket.send(json.dumps({"status":"ok", "retcode":0, "data":data, "echo":command["echo"]}))
@@ -42,14 +49,17 @@ class OneBot:
             if self.socket is socket:
                 self.ready.clear()
 
-    def ask(self, text, message_id):
+    def ask(self, text, message_id, *, group=False, sender=None, timeout=6):
         assert self.ready.wait(4), "OneBot login did not finish"
-        self.socket.send(json.dumps({
-            "post_type":"message", "message_type":"private", "sub_type":"friend",
-            "self_id":12345, "user_id":67890, "message_id":message_id,
-            "message":[{"type":"text","data":{"text":text}}]
-        }, ensure_ascii=False))
-        return self.outbound.get(timeout=6)
+        self.expected_peer = sender or self.peer
+        event = dict(post_type="message", message_type="group" if group else "private", sub_type="normal" if group else "friend",
+                     self_id=12345, user_id=sender or self.peer, message_id=message_id,
+                     message=[{"type":"text","data":{"text":text}}])
+        if group:
+            event["group_id"] = 23456
+            event["message"].insert(0, {"type":"at","data":{"qq":"12345"}})
+        self.socket.send(json.dumps(event, ensure_ascii=False))
+        return self.outbound.get(timeout=timeout)
 
     def close(self):
         self.server.shutdown()

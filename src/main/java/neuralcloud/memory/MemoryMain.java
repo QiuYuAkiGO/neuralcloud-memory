@@ -19,12 +19,19 @@ public final class MemoryMain {
     private final Ledger ledger;
     private final Reader reader;
     private final byte[] authorization;
+    private final byte[] channelAuthorization;
+    private final String grantAccount;
 
-    private MemoryMain(Store store, String token) {
+    private MemoryMain(Store store, String token, String channelToken, String grantAccount) {
         this.store = store;
         ledger = new Ledger(store);
         reader = new Reader(store);
         authorization = ("Bearer " + token).getBytes(StandardCharsets.UTF_8);
+        channelAuthorization =
+                channelToken == null
+                        ? null
+                        : ("Bearer " + channelToken).getBytes(StandardCharsets.UTF_8);
+        this.grantAccount = grantAccount;
     }
 
     public static void main(String[] args) throws Exception {
@@ -37,19 +44,27 @@ public final class MemoryMain {
         try (var file = Files.newBufferedReader(config)) {
             settings.load(file);
         }
-        if (!settings.stringPropertyNames()
-                .equals(
-                        Set.of(
-                                "port",
-                                "dataDirectory",
-                                "characterId",
-                                "accessTokenEnv",
-                                "sourceInstance")))
+        var fields = new HashSet<>(settings.stringPropertyNames());
+        boolean grants = fields.removeAll(Set.of("grantAccountId", "grantAccessTokenEnv"));
+        if (!fields.equals(
+                Set.of("port", "dataDirectory", "characterId", "accessTokenEnv", "sourceInstance")))
             throw new IllegalArgumentException(
                     "expected port, dataDirectory, characterId, accessTokenEnv, sourceInstance");
         String character = settings.getProperty("characterId"),
                 source = settings.getProperty("sourceInstance");
         String token = System.getenv(settings.getProperty("accessTokenEnv"));
+        String account = settings.getProperty("grantAccountId", "");
+        String channelEnv = settings.getProperty("grantAccessTokenEnv");
+        String channelToken =
+                channelEnv == null || channelEnv.isBlank() ? null : System.getenv(channelEnv);
+        if (grants
+                && (!settings.containsKey("grantAccessTokenEnv")
+                        || !account.matches("[1-9][0-9]{4,15}")
+                        || channelToken == null
+                        || !channelToken.matches("[!-~]{32,256}")
+                        || channelToken.equals(token)))
+            throw new IllegalArgumentException(
+                    "grantAccountId and a distinct grantAccessTokenEnv are required");
         if (token == null
                 || !token.matches("[!-~]{32,256}")
                 || !character.matches("[A-Za-z0-9_-]{1,128}")
@@ -66,7 +81,7 @@ public final class MemoryMain {
                         character,
                         source);
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", port), 64);
-        server.createContext("/v2/", new MemoryMain(store, token)::handle);
+        server.createContext("/v2/", new MemoryMain(store, token, channelToken, account)::handle);
         var executor = Executors.newVirtualThreadPerTaskExecutor();
         server.setExecutor(executor);
         Runtime.getRuntime()
@@ -97,25 +112,38 @@ public final class MemoryMain {
         int status = 200;
         try {
             var header = exchange.getRequestHeaders().getFirst("Authorization");
-            if (header == null
-                    || !MessageDigest.isEqual(
-                            authorization, header.getBytes(StandardCharsets.UTF_8)))
-                throw new Fault(401, "UNAUTHORIZED", "credential");
             String path = exchange.getRequestURI().getPath().substring(4);
+            boolean grant = Visibility.isCommand(path);
+            byte[] presented =
+                    header == null ? new byte[0] : header.getBytes(StandardCharsets.UTF_8);
+            boolean service = MessageDigest.isEqual(authorization, presented);
+            boolean channel =
+                    channelAuthorization != null
+                            && MessageDigest.isEqual(channelAuthorization, presented);
+            if (!service && !channel) throw new Fault(401, "UNAUTHORIZED", "credential");
+            if (grant ? !channel : !service) throw denied();
             boolean get = Set.of("health", "receipts", "changes").contains(path);
             if (!get
+                    && !grant
                     && !Set.of("ingest", "candidates", "corrections", "read", "recall")
                             .contains(path)) throw new Fault(404, "NOT_FOUND", "route");
             if (!exchange.getRequestMethod().equals(get ? "GET" : "POST"))
                 throw new Fault(405, "METHOD_NOT_ALLOWED", "method");
             JsonObject body = get ? parameters(exchange.getRequestURI()) : body(exchange);
+            if (grant && !grantAccount.equals(Access.from(store, body).account())) throw denied();
             result =
                     store.transaction(
                             () ->
                                     switch (path) {
                                         case "health" -> {
                                             keys(body, "");
-                                            yield store.info();
+                                            var info = store.info();
+                                            info.getAsJsonArray("capabilities")
+                                                    .add("audience_reads");
+                                            if (channelAuthorization != null)
+                                                info.getAsJsonArray("capabilities")
+                                                        .add("author_grants");
+                                            yield info;
                                         }
                                         case "receipts" -> {
                                             keys(body, "source_instance event_id");

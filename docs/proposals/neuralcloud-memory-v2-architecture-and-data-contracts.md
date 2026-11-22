@@ -69,7 +69,7 @@ v2 的业务时间使用带 UTC 偏移的 RFC 3339 时间字符串。`occurred_a
 - **按目的读。** 普通 `HISTORY` 以接收会话为范围。`SELF_IDENTITY` 只交付该账号经确认的称呼。`SELF_HISTORY` 仅对可信 QQ 私聊入站的本人开放，按原作者、允许的原始渠道、可见性和本轮之前的时间上限筛选。`privacy=private` 只描述隐私等级，展示“私聊”或群名需要渠道依据。
 - **先确定候选集合，再排名。** 身份、FTS、时间、向量和图的每一跳均应用当前受众约束。回读原文时逐条校验，缓存键包含受众、查询条件及权威水位。使用历史时间查询也须满足当前披露权限。多来源卡片的一段文字，仅在该受众能读且可在此引用其全部必要来源时交付，也可以从可见来源单独生成另一段。相同规则覆盖热索引标题、样板句和转交给另一 Worker 的材料。
 - **按交付项保留引用。** Memory 返回结构化正文、证据性质、原发言场合和本次可引用范围。Harness 渲染为“小林在项目群里说，例会改到周六 10 点。这条消息可在本群引用。”旧数据缺少的场合字段省略。技术标识进入审计与读取登记。Master 遵循当前任务的接收范围。
-- **通用跨会话授权在第二阶段开放。** 授权对象为 `grant_id, source_ref, target_conversation_id, use, grantor, reason, status`。`use` 取 `READ` 或 `CITE`，`CITE` 包含在指定会话读和引用的权限。授予者须有经配置的转授权权限，Memory 记录经认证的决策主体。授权精确绑定版本，撤回、更正或撤销使原授权退出有效集。此前获准阅读的 Worker 收到“原依据已失效”，只有新版本获准后才接收新正文。
+- **通用跨会话授权在第二阶段开放。** 授权对象为 `grant_id, source_ref, target_conversation_id, use, grantor, reason, status`。`use` 取 `READ` 或 `CITE`，`CITE` 包含在指定会话读和引用的权限。授予与撤销由经渠道认证的原作者决定。OpenQQ 通过经认证的私聊入站绑定机器人账号与发件人，Memory 逐项核对原始消息的账号、发送者和版本。显示名与模型输出不能授予权限。授权精确绑定版本，撤回、更正或撤销使原授权退出有效集。此前获准阅读的 Worker 收到“原依据已失效”，只有新版本获准后才接收新正文。
 
 ## 4. 两服务间的 HTTP 契约
 
@@ -177,7 +177,7 @@ Worker 的登记至少保留到实例结束。未完任务交接时，新实例�
 
 **首版联调取证。** 运行方为两个服务分别设置临时数据目录，从 Harness `ConsoleMain` 的会话入口提交消息。模型和渠道可使用可控端点，Memory 必须走真实进程、网络和持久存储。保留对应的 `router_memory_write → memory_durable`、`memory_call → memory_recall → memory_call_result`、实际首个模型输入、Memory 修订及 `seq`、工具/渠道回执。逐项比较 `record_id@revision` 与正文。复用 `paired-saturday`、`withdrawn-correction`、`attempt-without-receipt`、`private-evidence` 等既有样例，再补晚到派生、登记竞态和服务重启。用例中的越权正文、错误现行版本和重复副作用均要求为零。[会议评测原始用例][h-meet] · [会话记忆回归测试][h-conv-test]
 
-**资源和产品决策。** 联调按现有 0.8B Router 和 27B Master 配置记录，目标 9B 单独复测。检索收益和资源预算在固定数据规模、模型版本、并发与冷热缓存条件下报告。阶段 2 启用前须确定实际渠道中谁可授予或撤销引用权，再将该规则写入服务策略和双端用例。阶段 3、4 的精排开关、热索引 token 上限和整理间隔以本机验收数据确定。
+**资源和产品决策。** 联调按现有 0.8B Router 和 27B Master 配置记录，目标 9B 单独复测。检索收益和资源预算在固定数据规模、模型版本、并发与冷热缓存条件下报告。阶段 2 采用经渠道认证的原作者授权与撤销，服务凭据与渠道决策凭据分开配置。阶段 3、4 的精排开关、热索引 token 上限和整理间隔以本机验收数据确定。
 
 [h-openapi]: https://github.com/QiuYuAkiGO/neuralcloud-harness/blob/3db18942d34c963ec35dcd774b05363d4a2cfb25/contracts/resident/v1/openapi.v1.json
 [h-client]: https://github.com/QiuYuAkiGO/neuralcloud-harness/blob/3db18942d34c963ec35dcd774b05363d4a2cfb25/java/src/main/java/neuralcloud/controlplane/memory/ResidentMemory.java

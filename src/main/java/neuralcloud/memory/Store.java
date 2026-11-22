@@ -43,14 +43,12 @@ final class Store implements AutoCloseable {
             if (version == 0) {
                 if (!rows("SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'")
                         .isEmpty()) throw new IOException("unrecognized existing database");
-                try (var input = Store.class.getResourceAsStream("/schema.sql");
-                        var stmt = db.createStatement()) {
-                    for (String sql :
-                            new String(input.readAllBytes(), StandardCharsets.UTF_8).split(";"))
-                        if (!sql.isBlank()) stmt.execute(sql);
-                }
+                schema("/schema.sql");
                 update("INSERT INTO meta VALUES(?,?)", character, UUID.randomUUID().toString());
-            } else if (version != 2) throw new IOException("unsupported schema version " + version);
+            } else if (version != 2 && version != 3)
+                throw new IOException("unsupported schema version " + version);
+            // 旧库原地增加授权索引，保留原有流标识、版本与消费水位。
+            if (version < 3) schema("/visibility.sql");
             var metadata = rows("SELECT * FROM meta").getFirst();
             if (!character.equals(get(metadata, "character_id")))
                 throw new IOException("character_id mismatch");
@@ -61,6 +59,14 @@ final class Store implements AutoCloseable {
             db.close();
             lock.close();
             throw e;
+        }
+    }
+
+    private void schema(String resource) throws IOException, SQLException {
+        try (var input = Store.class.getResourceAsStream(resource);
+                var stmt = db.createStatement()) {
+            for (String sql : new String(input.readAllBytes(), StandardCharsets.UTF_8).split(";"))
+                if (!sql.isBlank()) stmt.execute(sql);
         }
     }
 

@@ -58,6 +58,21 @@ recallMode=scoped
 java -cp java/target/neuralcloud-control-plane-0.1.0-SNAPSHOT.jar neuralcloud.controlplane.app.ConsoleMain --config console.properties
 ```
 
+## 阶段 2 的跨会话授权
+
+原作者在 OpenQQ 私聊中授予或撤销自己发言的跨会话使用权。Memory 核对已认证连接绑定的机器人账号、私聊发件人和原消息的渠道来源。授权精确到一条原文的一个修订和一个目标会话。
+
+- Memory 配置增加 `grantAccountId` 和 `grantAccessTokenEnv`。后者指定独立的渠道凭据环境变量，值为 32 至 256 位可见 ASCII 字符。Harness 的 v2 scoped 记忆配置增加同一个 `grantAccessTokenEnv`，OpenQQ 配置的 `accountId` 与 Memory 对应。需要处理群消息时，在 OpenQQ 配置增加 `allowedGroupId`，群内 @ 机器人的纯文本消息才进入会话。
+- 原作者私聊发送 `/memory grant <record_id>@<revision> <目标会话> READ|CITE <理由>`。例如目标私聊的标识为 `c2c:onebot:<机器人号>:<接收者号>`。渠道返回授权 ID，原作者可发 `/memory revoke <grant_id> <理由>` 撤销。模型和网页转录均无法代替渠道身份。
+- `READ` 允许专用读取方请求原文窗口。面向用户的三个 Worker 均以 `CITE` 读取。省略 `use` 的旧客户端沿用首版可见范围。修订、撤回或撤权后，Worker 再次查询所获正文及派生项时按当前受众复核。授权决定和记录修订使用同一个变更流。[请求与回执示例](contracts/v2/examples/visibility-grant.json)
+
+构建两个仓库后，使用下列命令复跑。第一条覆盖模型边界、进程中断与行动计数，第二条在设置 `GEMINI_API_KEY` 的环境中经真实 Gemini 验证授权前、授权后和撤销后的渠道回复。两次运行各使用隔离的 OneBot 测试渠道和数据目录。[阶段 2 验收报告](docs/acceptance/memory-v2-stage-2.md)
+
+```powershell
+python -u tests/stage2.py --harness ../neuralcloud-harness
+python -u tests/stage2.py --harness ../neuralcloud-harness --gemini
+```
+
 ## 接口与证据
 
 八个首版接口使用同一 Bearer 凭据。写入以 `(source_instance, event_id)` 幂等。事项的显式替代关系、生效时间和修订历史用于区分原安排与现安排。更正或撤回在同一事务中使派生内容失效。`stream_id` 与 `read_seq` 随每次读取交付给 Harness，供下轮刷新和动作前复核使用。[v2 OpenAPI](contracts/v2/openapi.json) · [会议请求与响应](contracts/v2/examples/meeting.json) · [v1 对照样本](contracts/v2/examples/v1-replay.json)

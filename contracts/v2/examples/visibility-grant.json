@@ -1,0 +1,62 @@
+{
+  "grant": {
+    "method": "POST",
+    "path": "/v2/visibility-grants",
+    "request": {
+      "context": {
+        "character_id": "misty-dev",
+        "session_id": "c2c:onebot:12345:67890",
+        "conversation_id": "c2c:onebot:12345:67890",
+        "actor_id": "ORCHESTRATOR",
+        "role": "ORCHESTRATOR",
+        "qq": {
+          "account_id": "12345",
+          "peer_id": "67890"
+        }
+      },
+      "source_instance": "neuralcloud-java",
+      "event_id": "author-proof",
+      "source_ref": {
+        "record_id": "997968ab0c176dad32b1ca39bd43050fe40851b506323f0852d140577fa7d262",
+        "revision": 1
+      },
+      "target_conversation_id": "console:p2-check",
+      "use": "READ",
+      "reason": "身份校验"
+    },
+    "response": {
+      "status": "DURABLE",
+      "record_id": "997968ab0c176dad32b1ca39bd43050fe40851b506323f0852d140577fa7d262",
+      "revision": 1,
+      "seq": 8,
+      "grant_id": "fb2cf97bbc0eed6b9e251bb07b87e6d2f8e3b1e28d4f160e9a25c034abf408e6"
+    }
+  },
+  "revoke": {
+    "method": "POST",
+    "path": "/v2/visibility-grants/fb2cf97bbc0eed6b9e251bb07b87e6d2f8e3b1e28d4f160e9a25c034abf408e6/revoke",
+    "request": {
+      "context": {
+        "character_id": "misty-dev",
+        "session_id": "c2c:onebot:12345:67890",
+        "conversation_id": "c2c:onebot:12345:67890",
+        "actor_id": "ORCHESTRATOR",
+        "role": "ORCHESTRATOR",
+        "qq": {
+          "account_id": "12345",
+          "peer_id": "67890"
+        }
+      },
+      "source_instance": "neuralcloud-java",
+      "event_id": "revoke-proof",
+      "reason": "验证结束"
+    },
+    "response": {
+      "status": "DURABLE",
+      "record_id": "997968ab0c176dad32b1ca39bd43050fe40851b506323f0852d140577fa7d262",
+      "revision": 1,
+      "seq": 9,
+      "grant_id": "fb2cf97bbc0eed6b9e251bb07b87e6d2f8e3b1e28d4f160e9a25c034abf408e6"
+    }
+  }
+}

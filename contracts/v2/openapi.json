@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "NeuralCloud Memory",
-    "version": "2.0.0"
+    "version": "2.1.0"
   },
   "security": [
     {
@@ -740,6 +740,219 @@
           }
         }
       }
+    },
+    "/v2/visibility-grants": {
+      "post": {
+        "operationId": "grantVisibility",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VisibilityGrant"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/Receipt"
+                    },
+                    {
+                      "required": [
+                        "grant_id"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body too large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid field",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Storage unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "oneBotAuthorBearer": []
+          }
+        ]
+      }
+    },
+    "/v2/visibility-grants/{grant_id}/revoke": {
+      "post": {
+        "operationId": "revokeVisibility",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VisibilityRevoke"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/Receipt"
+                    },
+                    {
+                      "required": [
+                        "grant_id"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body too large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid field",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Storage unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "oneBotAuthorBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "grant_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        ]
+      }
     }
   },
   "components": {
@@ -748,6 +961,11 @@
         "type": "http",
         "scheme": "bearer",
         "description": "Trusted Harness service principal, bound to one character and configured source instance."
+      },
+      "oneBotAuthorBearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Authenticated OneBot bridge, isolated from the Harness service credential and bound to one bot account. The private inbound peer must match the original channel sender."
       }
     },
     "schemas": {
@@ -993,6 +1211,14 @@
               "account_id",
               "name"
             ]
+          },
+          "source_refs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RecordRef"
+            },
+            "minItems": 1,
+            "maxItems": 128
           }
         },
         "required": [
@@ -1003,7 +1229,23 @@
           "content",
           "kind"
         ],
-        "description": "工具尝试、执行结果和送达回执要求 action_id。只有 observation 可带 assertion 或经 ORCHESTRATOR 确认的 identity。"
+        "description": "工具尝试、执行结果和送达回执要求 action_id。只有 observation 可带 assertion 或经 ORCHESTRATOR 确认的 identity。",
+        "allOf": [
+          {
+            "if": {
+              "required": [
+                "source_refs"
+              ]
+            },
+            "then": {
+              "properties": {
+                "kind": {
+                  "const": "self_expression"
+                }
+              }
+            }
+          }
+        ]
       },
       "Candidate": {
         "type": "object",
@@ -1162,6 +1404,10 @@
             "type": "integer",
             "format": "int64",
             "minimum": 1
+          },
+          "grant_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
           }
         },
         "required": [
@@ -1242,11 +1488,35 @@
             "format": "int64",
             "minimum": 1,
             "maximum": 16384
+          },
+          "use": {
+            "type": "string",
+            "enum": [
+              "READ",
+              "CITE"
+            ],
+            "description": "省略沿用首版会话范围。显式 READ 交付只读正文，CITE 交付可在当前会话引用的正文。"
           }
         },
         "required": [
           "context",
           "targets"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "required": [
+                "use"
+              ]
+            },
+            "then": {
+              "properties": {
+                "kind": {
+                  "const": "HISTORY"
+                }
+              }
+            }
+          }
         ]
       },
       "Recall": {
@@ -1309,6 +1579,14 @@
           "before": {
             "type": "string",
             "format": "date-time"
+          },
+          "use": {
+            "type": "string",
+            "enum": [
+              "READ",
+              "CITE"
+            ],
+            "description": "省略沿用首版会话范围。显式 READ 交付只读正文，CITE 交付可在当前会话引用的正文。"
           }
         },
         "required": [
@@ -1318,7 +1596,23 @@
           "profile",
           "limit"
         ],
-        "description": "SELF_IDENTITY 的 query 为空。SELF_HISTORY 绑定入站 QQ 私聊、before 与 1–16 的 limit。before 为排他的发言时间上界。"
+        "description": "SELF_IDENTITY 的 query 为空。SELF_HISTORY 绑定入站 QQ 私聊、before 与 1–16 的 limit。before 为排他的发言时间上界。",
+        "allOf": [
+          {
+            "if": {
+              "required": [
+                "use"
+              ]
+            },
+            "then": {
+              "properties": {
+                "kind": {
+                  "const": "HISTORY"
+                }
+              }
+            }
+          }
+        ]
       },
       "Item": {
         "oneOf": [
@@ -1401,6 +1695,12 @@
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 256
+              },
+              "use": {
+                "const": "READ"
+              },
+              "grant_dependent": {
+                "const": true
               }
             },
             "required": [
@@ -1411,8 +1711,29 @@
               "basis",
               "view",
               "text",
-              "occurred_at",
-              "citation_scope"
+              "occurred_at"
+            ],
+            "oneOf": [
+              {
+                "required": [
+                  "citation_scope"
+                ],
+                "not": {
+                  "required": [
+                    "use"
+                  ]
+                }
+              },
+              {
+                "required": [
+                  "use"
+                ],
+                "not": {
+                  "required": [
+                    "citation_scope"
+                  ]
+                }
+              }
             ]
           },
           {
@@ -1527,7 +1848,9 @@
                     "REPLACE",
                     "RETRACT",
                     "SOURCE_CHANGED",
-                    "ASSERTION_UPDATED"
+                    "ASSERTION_UPDATED",
+                    "GRANT",
+                    "REVOKE"
                   ]
                 },
                 "record_id": {
@@ -1677,6 +2000,84 @@
           "read_seq",
           "items",
           "assessment"
+        ]
+      },
+      "VisibilityGrant": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "context": {
+            "$ref": "#/components/schemas/Context"
+          },
+          "source_instance": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "event_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          },
+          "source_ref": {
+            "$ref": "#/components/schemas/RecordRef"
+          },
+          "target_conversation_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "use": {
+            "type": "string",
+            "enum": [
+              "READ",
+              "CITE"
+            ]
+          }
+        },
+        "required": [
+          "context",
+          "source_instance",
+          "event_id",
+          "reason",
+          "source_ref",
+          "target_conversation_id",
+          "use"
+        ]
+      },
+      "VisibilityRevoke": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "context": {
+            "$ref": "#/components/schemas/Context"
+          },
+          "source_instance": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "event_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          }
+        },
+        "required": [
+          "context",
+          "source_instance",
+          "event_id",
+          "reason"
         ]
       }
     }

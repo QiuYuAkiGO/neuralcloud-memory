@@ -20,11 +20,12 @@ final class Ledger {
         if (!source.equals(store.writer)) throw denied();
         var rows =
                 store.rows(
-                        "SELECT record_id,revision,seq FROM receipts WHERE source=? AND event=?",
+                        "SELECT record_id,revision,seq,grant_id FROM receipts WHERE source=? AND event=?",
                         source,
                         event);
         if (rows.isEmpty()) return obj("status", "NOT_FOUND");
         var r = rows.getFirst();
+        if (r.get("grant_id").isJsonNull()) r.remove("grant_id");
         r.addProperty("status", "DURABLE");
         return r;
     }
@@ -45,29 +46,49 @@ final class Ledger {
                 throw conflict("EVENT_ID_CONTENT_CONFLICT");
             return receipt(source, event);
         }
-        String id;
-        if (route.equals("corrections")) id = correct(ctx, cmd);
-        else id = insert(ctx, cmd, route.equals("candidates"));
-        long rev =
-                num(
-                        store.rows("SELECT revision FROM records WHERE id=?", id).getFirst(),
-                        "revision");
+        String id, grant = null;
+        long rev;
+        if (Visibility.isCommand(route)) {
+            var decision = Visibility.decide(store, ctx, route, cmd);
+            id = decision.record();
+            rev = decision.revision();
+            grant = decision.grant();
+            change(id, rev, route.equals(Visibility.GRANTS) ? "GRANT" : "REVOKE");
+            // 新通知的可见范围变化，也可能改变该受众眼中旧通知的生效状态。
+            var body =
+                    store.rows(
+                                    "SELECT body FROM revisions WHERE record_id=? AND revision=?",
+                                    id,
+                                    rev)
+                            .getFirst();
+            notifyPredecessors(parse(get(body, "body")), null);
+        } else {
+            id =
+                    route.equals("corrections")
+                            ? correct(ctx, cmd)
+                            : insert(ctx, cmd, route.equals("candidates"));
+            rev =
+                    num(
+                            store.rows("SELECT revision FROM records WHERE id=?", id).getFirst(),
+                            "revision");
+        }
         store.update(
-                "INSERT INTO receipts VALUES(?,?,?,?,?,?,?)",
+                "INSERT INTO receipts VALUES(?,?,?,?,?,?,?,?)",
                 source,
                 event,
                 route,
                 JSON.toJson(cmd),
                 id,
                 rev,
-                store.head());
+                store.head(),
+                grant);
         return receipt(source, event);
     }
 
     private String insert(Access ctx, JsonObject cmd, boolean candidate) throws SQLException {
         String base = "kind content occurred_at speaker source_venue privacy";
         if (candidate) keys(cmd, COMMAND + base + " source_refs author");
-        else keys(cmd, COMMAND + base + " channel action_id assertion identity");
+        else keys(cmd, COMMAND + base + " channel action_id assertion identity source_refs");
         String kind =
                 candidate
                         ? one(cmd, "kind", "summary", "impression")
@@ -80,6 +101,8 @@ final class Ledger {
                                 "tool_result",
                                 "delivery_receipt");
         String occurred = time(cmd, "occurred_at");
+        if (!candidate && cmd.has("source_refs") && !kind.equals("self_expression"))
+            throw invalid("source_refs");
         text(cmd, "content", 32768);
         var body = cmd.deepCopy();
         for (String key : List.of("context", "event_id", "source_instance")) body.remove(key);
@@ -116,21 +139,30 @@ final class Ledger {
                 ctx.actor(),
                 store.writer,
                 kind);
-        if (candidate) {
+        if (candidate || cmd.has("source_refs")) {
             for (var e : array(cmd, "source_refs", 1, 128)) {
                 if (!e.isJsonObject()) throw invalid("source_refs");
                 var ref = e.getAsJsonObject();
                 keys(ref, "record_id revision");
                 String rid = id(ref, "record_id");
                 long expected = number(ref, "revision", 1, Long.MAX_VALUE);
-                var row = current(ctx.scope(), rid);
-                if (row == null
-                        || !get(row, "status").equals("ONLINE")
-                        || num(row, "revision") != expected) throw conflict("SOURCE_CHANGED");
-                if ("sensitive".equals(get(parse(get(row, "body")), "privacy"))) {
-                    if (ctx.peer() != null) throw denied();
-                    body.addProperty("privacy", "sensitive");
+                if (candidate) {
+                    var row = new Reader(store).currentFor(ctx, "CITE", rid);
+                    if (row == null
+                            || !get(row, "status").equals("ONLINE")
+                            || num(row, "revision") != expected) throw conflict("SOURCE_CHANGED");
+                    if ("sensitive".equals(get(parse(get(row, "body")), "privacy"))) {
+                        if (ctx.peer() != null) throw denied();
+                        body.addProperty("privacy", "sensitive");
+                    }
+                } else if (store.rows(
+                                "SELECT 1 FROM revisions WHERE record_id=? AND revision=?",
+                                rid,
+                                expected)
+                        .isEmpty()) {
+                    throw conflict("SOURCE_CHANGED");
                 }
+                // 已送达的渠道正文如实入账。即使在写回之前撤权，此依赖也会阻止再次交付旧正文。
                 store.update("INSERT OR IGNORE INTO sources VALUES(?,?,?)", id, rid, expected);
             }
         }
@@ -210,6 +242,9 @@ final class Ledger {
                 "UPDATE records SET revision=?,status=? WHERE id=?",
                 expected + 1,
                 op.equals("RETRACT") ? "RETRACTED" : "ONLINE",
+                id);
+        store.update(
+                "UPDATE visibility_grants SET status='SOURCE_CHANGED' WHERE record_id=? AND status='ACTIVE'",
                 id);
         // Invalidate descendants in the same transaction. Their own revision can remain unchanged.
         var dependents =
