@@ -197,6 +197,16 @@ class GeminiMeeting:
         self.check(
             "distinct original observations", old["record_id"] != new["record_id"] and old["seq"] < new["seq"]
         )
+        recap = self.turn("ask-for-recap", "所以可以讲下这次例会前后改期发生了什么吗")
+        first = schedule_mention(recap["answer"], "friday")
+        second = schedule_mention(recap["answer"], "saturday")
+        self.check(
+            "recap delivers both source notices in chronological order",
+            recap["plan"] == "HISTORY"
+            and self.cited(recap, old) and self.cited(recap, new)
+            and first is not None and second is not None and first.start() < second.start()
+            and "小林" in recap["answer"] and "项目群" in recap["answer"],
+        )
         original = self.turn("ask-original", "请查一下例会的原始发言。最初约在星期几几点，是谁在哪儿说的？")
         current = self.turn(
             "ask-current", "请核对例会改期的那条原话。最新安排在星期几几点？请带上发言人和场合。"
@@ -304,7 +314,7 @@ class GeminiMeeting:
         self.report["receipts"].update(original=old, reschedule=new, revised=revised, withdrawn=withdrawn)
 
 
-def describes(text, slot):
+def schedule_mention(text, slot):
     # Match the two parts of the schedule together, allowing normal Chinese paraphrases.
     compact = re.sub(r"[\s*_\x60]", "", unicodedata.normalize("NFKC", text))
     day, hour = {
@@ -318,7 +328,11 @@ def describes(text, slot):
             r"(?:14|十四|下午[2两二])(?:[:点时]00?|[点时])",
         ),
     }[slot]
-    return re.search(day + r"[^。！？\n]{0,24}?" + hour, compact) is not None
+    return re.search(day + r"[^。！？\n]{0,24}?" + hour, compact)
+
+
+def describes(text, slot):
+    return schedule_mention(text, slot) is not None
 
 
 def states_arrangement(answer, slot, *, historical=False):
@@ -425,6 +439,7 @@ def main():
         case.report.update(stream_id=health["stream_id"], processes=pair.pids)
         manifest = dict(
             console=pair.console.removesuffix("api/"),
+            chat_url=pair.console.removesuffix("api/") + "?chain=" + case.chain,
             memory=pair.base,
             chain=case.chain,
             ledger=str(pair.ledger),
@@ -439,6 +454,7 @@ def main():
         case.report["status"] = "PASSED"
         case.save()
         print("PASS real Gemini meeting case;", len(case.report["turns"]), "turns", flush=True)
+        print("Chat:", manifest["chat_url"], flush=True)
     except Exception as exc:
         case.report.update(status="FAILED", error=str(exc))
         case.save()

@@ -14,17 +14,17 @@ python -m pip install "jsonschema>=4.17,<5" "websockets>=11,<16"
 python -u tests/acceptance.py --harness ../neuralcloud-harness
 ```
 
-回放启动两个真实 JVM，通过 `POST /api/nodes/chat-worker/messages` 向 Harness 发送会议发言和问题。测试工具在回环地址提供模型、OneBot 和提醒执行器，并生成隔离凭据。`target/acceptance/<批次>/` 保存逐项结果、模型请求、审计和数据库。默认回放结束时关闭本次进程，断言失败以非零状态退出。追加 `--serve-demo` 可在验收后保留采用固定模型的回归控制台，使用 `demo.json` 中的地址和 `meeting-demo` 会话继续查问。按 Ctrl+C 或在批次目录创建名为 `STOP` 的空文件即可结束。
+回放启动两个真实 JVM，通过 `POST /api/nodes/chat-worker/messages` 向 Harness 发送会议发言和问题。测试工具在回环地址提供模型、OneBot 和提醒执行器，并生成隔离凭据。`target/acceptance/<批次>/` 保存逐项结果、模型请求、审计和数据库。默认回放结束时关闭本次进程，断言失败以非零状态退出。追加 `--serve-demo` 可在验收后保留采用固定模型的回归控制台，打开 `demo.json` 中的 `chat_url` 可在 `meeting-demo` 会话继续查问。按 Ctrl+C 或在批次目录创建名为 `STOP` 的空文件即可结束。
 
 ## 用真实 Gemini 验收会议改期
 
-构建两个 JAR 并安装上述验证依赖后，在启动环境中设置 `GEMINI_API_KEY`。Chat Worker 使用 Harness 的 `chat-worker-gemini.properties` 选择官方模型与代理。运行以下命令会将本次合成会话发给 Gemini，在独立会话中核对原安排、改期、提醒回执、原文编辑和撤回。提醒执行器使用本地测试清单。
+构建两个 JAR 并安装上述验证依赖后，在启动环境中设置 `GEMINI_API_KEY`。Chat Worker 使用 Harness 的 `chat-worker-gemini.properties` 选择官方模型与代理。运行以下命令会将本次合成会话发给 Gemini，在独立会话中按用户的原问题复盘两次通知，再核对原安排、改期、提醒回执、原文编辑和撤回。提醒执行器使用本地测试清单。
 
 ```powershell
 python -u tests/gemini_meeting.py --harness ../neuralcloud-harness --serve
 ```
 
-`gemini-case.json` 保存每轮真实回答、规划调用的 token 计数、记忆版本和持久回执。`meeting-audit.json` 保存正式入口的审计链。`--serve` 在验收通过后保留控制台，地址和停止文件位置见同批次的 `demo.json`。要沿用已停止实例的端口、记忆库和审计目录，可追加 `--resume-demo <上个批次的 demo.json>`。[真实 Gemini 验收记录](docs/acceptance/gemini-meeting.md)
+`gemini-case.json` 保存每轮真实回答、规划调用的 token 计数、记忆版本和持久回执。`meeting-audit.json` 保存正式入口的审计链。`--serve` 在验收通过后保留控制台，打开同批次 `demo.json` 的 `chat_url` 可继续这条会议会话，停止文件位置见 `stop_file`。要沿用已停止实例的端口、记忆库和审计目录，可追加 `--resume-demo <上个批次的 demo.json>`。[真实 Gemini 验收记录](docs/acceptance/gemini-meeting.md)
 
 ## 单独启动两个服务
 

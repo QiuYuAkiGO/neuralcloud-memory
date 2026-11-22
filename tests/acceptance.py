@@ -657,7 +657,8 @@ def serve_demo(run):
             dict(record_id=first["recordId"],revision=first["revision"])))
     answer=run.msg(chain,"例会现在是什么时候？")
     assert "周六 10 点" in answer and "小林" in answer
-    dump(run.out/"demo.json",dict(console=run.console.removesuffix("api/"),memory=run.base,chain=chain,
+    console=run.console.removesuffix("api/")
+    dump(run.out/"demo.json",dict(console=console,chat_url=console+"?chain="+chain,memory=run.base,chain=chain,
          memory_pid=run.mproc.pid,harness_pid=run.hproc.pid,stop_file=str(run.out/"STOP"),answer=answer))
     run.save()
     print("Demo ready:",run.out/"demo.json",flush=True)
