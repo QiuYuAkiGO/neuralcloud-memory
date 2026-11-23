@@ -111,6 +111,39 @@ final class CardCatalog {
      *   <li>{@code view=L1}（必传 axis 与 title）：展开单张卡片，返回至多 {@code limit} 条 320 码点摘录及去重后的叶子 {@code source_refs}/{@code source_count}。</li>
      *   <li>逐条复核 {@code CITE} 权限、当前断言活跃态及全部叶子来源有效性，防止已过期、被替代或撤权的内容泄露到标题或计数中。</li>
      * </ul>
+     *
+     * <p>{@code query} 请求体示例（L0 目录，{@code axis} 可省略；若为 QQ 私聊受众，{@code context} 需附 {@code qq: {"account_id": "...", "peer_id": "..."}}）：
+     * <pre>{@code
+     * {
+     *   "context": {
+     *     "character_id": "misty-dev",
+     *     "session_id": "session-1",
+     *     "conversation_id": "group:demo",
+     *     "actor_id": "MASTER",
+     *     "role": "MASTER"
+     *   },
+     *   "view": "L0",
+     *   "axis": "SUBJECT",
+     *   "limit": 12
+     * }
+     * }</pre>
+     *
+     * <p>{@code query} 请求体示例（L1 单卡展开，必传 {@code axis} 与 {@code title}）：
+     * <pre>{@code
+     * {
+     *   "context": {
+     *     "character_id": "misty-dev",
+     *     "session_id": "session-1",
+     *     "conversation_id": "group:demo",
+     *     "actor_id": "MASTER",
+     *     "role": "MASTER"
+     *   },
+     *   "view": "L1",
+     *   "axis": "SUBJECT",
+     *   "title": "项目例会",
+     *   "limit": 8
+     * }
+     * }</pre>
      */
     JsonObject cards(JsonObject query) throws SQLException {
         keys(query, "context view axis title limit");
