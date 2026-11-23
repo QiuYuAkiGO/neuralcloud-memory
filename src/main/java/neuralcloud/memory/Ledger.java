@@ -513,16 +513,20 @@ WHERE r.conversation=? AND r.id=?""",
         if (body.has("assertion")) store.indexClaim(id, rev, object(body, "assertion"));
         unindex(id);
         if (!op.equals("RETRACT")) {
-            CellSearch.index(store, id, body);
-            String searchable = get(body, "content");
-            for (String k : List.of("speaker", "action_id"))
-                if (body.has(k)) searchable += " " + get(body, k);
-            if (body.has("assertion"))
-                searchable += " " + get(object(body, "assertion"), "subject_id");
-            store.update(
-                    "INSERT INTO search(rowid,terms) SELECT rowid,? FROM records WHERE id=?",
-                    String.join(" ", Terms.terms(searchable)),
-                    id);
+            index(store, id, body);
         }
+    }
+
+    /** 正常入账和离线迁移共用相同的在线词表与事件单元索引。 */
+    static void index(Store store, String id, JsonObject body) throws SQLException {
+        CellSearch.index(store, id, body);
+        String searchable = get(body, "content");
+        for (String k : List.of("speaker", "action_id"))
+            if (body.has(k)) searchable += " " + get(body, k);
+        if (body.has("assertion")) searchable += " " + get(object(body, "assertion"), "subject_id");
+        store.update(
+                "INSERT INTO search(rowid,terms) SELECT rowid,? FROM records WHERE id=?",
+                String.join(" ", Terms.terms(searchable)),
+                id);
     }
 }
