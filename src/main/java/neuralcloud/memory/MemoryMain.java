@@ -212,6 +212,8 @@ public final class MemoryMain {
                                                     .add("audience_reads");
                                             info.getAsJsonArray("capabilities")
                                                     .add("mobile_member_notices");
+                                            info.getAsJsonArray("capabilities")
+                                                    .add("qq_member_notices");
                                             info.addProperty(
                                                     "retrieval_mode", retrievalMode.name());
                                             info.getAsJsonArray("capabilities")

@@ -168,7 +168,7 @@ WHERE d.derived=?""",
         } else if (purpose.equals("SELF_HISTORY")) {
             out.addProperty(
                     "source_venue",
-                    get(object(body, "channel"), "type").equals("qq_group") ? "QQ 群聊" : "QQ 私聊");
+                    get(object(body, "channel"), "type").equals("qq_private") ? "QQ 私聊" : "QQ 群聊");
             out.addProperty("speaker", "当前账号本人");
         } else {
             if (body.has("source_refs")) {
@@ -184,6 +184,8 @@ WHERE d.derived=?""",
                 if (body.has(key)) out.add(key, body.get(key));
             // 跨会话引用他人原话时去除原会话第一人称语境，避免目标受众把“用户/当前 QQ 私聊”误解为自己。
             if (!get(row, "conversation").equals(ctx.scope()) && body.has("channel")) {
+                if (get(object(body, "channel"), "type").equals("qq_group_notice"))
+                    out.addProperty("member_notice", true);
                 if (out.has("speaker") && "用户".equals(get(out, "speaker")))
                     out.addProperty("speaker", "原发言者");
                 if (out.has("source_venue") && "当前 QQ 私聊".equals(get(out, "source_venue")))
@@ -221,7 +223,7 @@ WHERE d.derived=?""",
             args.add(ctx.peer());
             return """
 r.kind='observation' AND json_extract(v.body,'$.privacy') IN ('public','private')
-AND json_extract(v.body,'$.channel.type') IN ('qq_private','qq_group')
+AND json_extract(v.body,'$.channel.type') IN ('qq_private','qq_group','qq_group_notice')
 AND json_extract(v.body,'$.channel.account_id')=? AND json_extract(v.body,'$.channel.sender_id')=? """;
         }
         if (purpose.equals("SELF_IDENTITY")) {

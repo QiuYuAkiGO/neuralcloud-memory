@@ -1188,6 +1188,11 @@
               "peer_id": {
                 "type": "string",
                 "pattern": "^[1-9][0-9]{4,15}$"
+              },
+              "member_group_ids": {
+                "description": "可信 QQ 渠道在处理本次私聊时核验的已接收群。仅可引用该群显式通知的在线现版。",
+                "type": "array", "uniqueItems": true, "minItems": 1, "maxItems": 256,
+                "items": {"type": "string", "pattern": "^[1-9][0-9]{4,15}$"}
               }
             },
             "required": [
@@ -1310,7 +1315,8 @@
                 "type": "string",
                 "enum": [
                   "qq_private",
-                  "qq_group"
+                  "qq_group",
+                  "qq_group_notice"
                 ]
               },
               "account_id": {
@@ -1668,7 +1674,10 @@
             ]
           },
           "channel": {
-            "$ref": "#/components/schemas/MobileNoticeChannel"
+            "oneOf": [
+              {"$ref": "#/components/schemas/MobileNoticeChannel"},
+              {"allOf": [{"$ref": "#/components/schemas/Channel"}, {"properties": {"type": {"const": "qq_group_notice"}}}]}
+            ]
           }
         },
         "required": [
@@ -2025,6 +2034,7 @@
               "use": {
                 "const": "READ"
               },
+              "member_notice": {"const": true, "description": "跨会话引用的显式 QQ 群通知，按本条正文及精确版本交付。"},
               "grant_dependent": {
                 "const": true
               },

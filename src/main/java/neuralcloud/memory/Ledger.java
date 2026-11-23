@@ -272,7 +272,9 @@ final class Ledger {
                     || !group.equals(text(channel, "conversation_id", 256))) throw denied();
             return;
         }
-        String type = one(channel, "type", "qq_private", "qq_group");
+        String type = one(channel, "type", "qq_private", "qq_group", "qq_group_notice");
+        if (type.equals("qq_group_notice") && !kind.equals("observation"))
+            throw invalid("channel.type");
         String account = Access.qqId(channel, "account_id"),
                 sender = Access.qqId(channel, "sender_id");
         String scope = text(channel, "conversation_id", 256);
@@ -359,13 +361,18 @@ final class Ledger {
         var body = previousBody.deepCopy();
         // 群通知的每次替换或撤回来自同一作者的新群消息；保留各版实际消息 ID 供审计。
         var priorChannel = previousBody.getAsJsonObject("channel");
-        boolean notice = priorChannel != null && "mistyai".equals(get(priorChannel, "platform"));
+        boolean notice =
+                priorChannel != null
+                        && Set.of("mobile_group_notice", "qq_group_notice")
+                                .contains(get(priorChannel, "type"));
         if (notice != cmd.has("channel")) throw invalid("channel");
         if (notice) {
             var next = object(cmd, "channel");
             channel(ctx, next, get(old, "kind"));
-            if (!"mistyai".equals(get(next, "platform"))
-                    || !get(priorChannel, "sender_id").equals(get(next, "sender_id"))) throw denied();
+            if (!get(priorChannel, "type").equals(get(next, "type"))
+                    || !get(priorChannel, "account_id").equals(get(next, "account_id"))
+                    || !get(priorChannel, "sender_id").equals(get(next, "sender_id")))
+                throw denied();
             if (get(priorChannel, "message_id").equals(get(next, "message_id"))) throw invalid("message_id");
             body.add("channel", next);
         }

@@ -50,14 +50,19 @@ final class Visibility {
         args.add(ctx.scope());
         args.add(use);
         String direct = "", dependency = "";
-        if (ctx.mobileGroup() != null) {
-            args.add(ctx.mobileGroup());
-            direct = " OR (r.id,v.revision) IN (" + MEMBER_NOTICES + ")";
+        String memberNotices =
+                MEMBER_NOTICES.formatted(
+                        String.join(
+                                ",",
+                                java.util.Collections.nCopies(ctx.memberGroups().size(), "?")));
+        if (!ctx.memberGroups().isEmpty()) {
+            args.addAll(ctx.memberGroups());
+            direct = " OR (r.id,v.revision) IN (" + memberNotices + ")";
         }
         args.add(ctx.scope());
-        if (ctx.mobileGroup() != null) {
-            args.add(ctx.mobileGroup());
-            dependency = " AND (d.source,d.revision) NOT IN (" + MEMBER_NOTICES + ")";
+        if (!ctx.memberGroups().isEmpty()) {
+            args.addAll(ctx.memberGroups());
+            dependency = " AND (d.source,d.revision) NOT IN (" + memberNotices + ")";
         }
         // 注意：跨会话授权只匹配当前最新修订（v.revision=r.revision），且状态为 ACTIVE。
         // 非 ONLINE 项（如 RETRACTED/SOURCE_CHANGED）跳过依赖检查，以便读接口可向原有受众返回失效状态而非正文。
@@ -75,12 +80,12 @@ final class Visibility {
     }
 
     /** 同群成员仅能引用群通知的在线现版。派生回复的每条证据也使用同一集合复核。 */
-    private static final String MEMBER_NOTICES = """
+    private static final String MEMBER_NOTICES =
+            """
             SELECT n.id,n.revision FROM records n JOIN revisions nv
             ON nv.record_id=n.id AND nv.revision=n.revision
-            WHERE n.conversation=? AND n.kind='observation' AND n.status='ONLINE'
-            AND json_extract(nv.body,'$.channel.platform')='mistyai'
-            AND json_extract(nv.body,'$.channel.type')='mobile_group_notice'
+            WHERE n.conversation IN (%s) AND n.kind='observation' AND n.status='ONLINE'
+            AND json_extract(nv.body,'$.channel.type') IN ('mobile_group_notice','qq_group_notice')
             AND json_extract(nv.body,'$.privacy') IN ('public','private')
             """;
 
