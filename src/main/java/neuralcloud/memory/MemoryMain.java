@@ -210,6 +210,8 @@ public final class MemoryMain {
                                             // 根据本实例启用的检索模式与渠道授权配置，动态宣告可用能力集合。
                                             info.getAsJsonArray("capabilities")
                                                     .add("audience_reads");
+                                            info.getAsJsonArray("capabilities")
+                                                    .add("mobile_member_notices");
                                             info.addProperty(
                                                     "retrieval_mode", retrievalMode.name());
                                             info.getAsJsonArray("capabilities")
