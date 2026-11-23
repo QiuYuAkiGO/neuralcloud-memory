@@ -1,4 +1,10 @@
-"""Paired replay of the frozen Chinese corpus, using actual phase-one and candidate JVMs."""
+"""阶段 3 冻结中文多轮语料的成对消融回放与发布门禁脚本。
+
+在固定候选预算和上下文预算下，依次用历史阶段 1 基线 JAR（P1）及当前候选 JAR
+（LEXICAL / CELLS / TEMPORAL / HYBRID / HYBRID+THINKING）执行同一组语料回放，
+汇总按题型分组的 Recall@5 命中、来源归属正确率、过期证据率、P95 检索延迟及聊天首字延迟，
+并在 `--gate` 模式下自动判定最终应启用的默认检索模式。
+"""
 import argparse
 import hashlib
 import http.client
@@ -18,10 +24,12 @@ BASE = ROOT / "target/stage34-baseline"
 
 
 def p95(values):
+    """按向上取整下标计算列表的 P95 延迟（单位 ms，保留两位小数）。"""
     return round(sorted(values)[math.ceil(len(values) * 0.95) - 1], 2)
 
 
 def seed(run, legacy=False):
+    """将冻结中文语料按序写入 Memory 账本；legacy=True 时剥离阶段 1 尚不支持的 topic/reply_to/valid_until 字段。"""
     receipts = {}
     for row in DATA["events"]:
         r = dict(row)
@@ -37,8 +45,9 @@ def seed(run, legacy=False):
 
 
 def chat(run, prompts):
-    # ConsoleMain buffers a JSON reply. Read through the first decoded character of data.text.
-    # This includes the HTTP request, retrieval, model decision/reply and pre-delivery checks.
+    """测量端到端聊天首字延迟：向 ConsoleMain 发请求并逐字节流式读取，直到解码出 JSON 中 `data.text` 的首个 UTF-8 字符。
+    计时涵盖 HTTP 请求、记忆检索、模型决策/回复与交付前复核全过程。
+    """
     from urllib.parse import urlsplit
 
     u = urlsplit(run.console)
@@ -75,9 +84,11 @@ def chat(run, prompts):
 
 
 def replay(mode, baseline, do_chat):
+    """在隔离运行目录中执行单个检索模式的完整回放：灌入语料、冷/热轮召回计时、在线对照组与可选首字延迟测量。"""
     run = Run(ROOT.parent / "neuralcloud-harness")
     try:
         if mode == "P1":
+            # P1 基线强制校验两个历史 worktree 的精确 Git 提交哈希，保证跨阶段对照实验可复现。
             for field, project in (("memjar", baseline / "memory"), ("hjar", baseline / "harness/java")):
                 root = project.parent if field == "hjar" else project
                 expected = (
@@ -118,7 +129,7 @@ def replay(mode, baseline, do_chat):
         details = []
         by_case = [[] for _ in requests]
         for n in range(P["warm_rounds"] + 1):
-            # Rotate the start to avoid keeping the same question at the same cache position.
+            # 每轮轮换起始题目下标，避免固定题目总是落在相同的 SQLite 页缓存热度位置。
             for j in range(len(requests)):
                 i = (j + n) % len(requests)
                 start = time.perf_counter_ns()
@@ -154,7 +165,7 @@ def replay(mode, baseline, do_chat):
                         correct_empty=not hits if not gold else None,
                     )
                 )
-        # Online (no retrospective fields) control: same frozen text with P1's normal FTS path.
+        # 在线对照组（不带 as_of_valid 历史时间参数）：验证同等文本在 P1 常规实时 FTS 路径下的表现。
         online = []
         for i, case in enumerate(DATA["questions"]):
             if case["group"] not in ("字面与归属", "事件与指代", "相对日期", "受众"):
@@ -170,8 +181,7 @@ def replay(mode, baseline, do_chat):
             if mode != "P1":
                 assert run.audit("memory-startup")[-1]["data"]["historyProfile"] == profile
 
-            # Copy the exact source texts into each independent chat scope under the same event mapping.
-            # Use the same frozen query for the model plan; never consult the gold evidence when replying.
+            # 将同一份原话按相同引用拓扑复制到各独立计时会话，模型规划严格沿用冻结查询，绝不参考 gold 标注。
             def model(body):
                 if "contents" not in body:
                     return None
@@ -214,7 +224,7 @@ def replay(mode, baseline, do_chat):
             chats = chat(
                 run, [DATA["questions"][i % len(requests)]["query"] for i in range(P["chat_repeats"] + 1)]
             )
-        # Keep sample counts with each P95. Some chat strata are small in the predeclared 25 turns.
+        # 为每个分题型 P95 保留实际样本量（预先约定的 25 轮聊天中部分细分题型样本较少）。
         by_group = {}
         for group in dict.fromkeys(case["group"] for case in DATA["questions"]):
             qids = [i for i, c in enumerate(DATA["questions"]) if c["group"] == group]
@@ -293,7 +303,7 @@ if __name__ == "__main__":
                 and r["chat_p95_ms"] - base["chat_p95_ms"] <= P["chat_p95_delta_ms"]
             )
             gain = score(r) - score(best)
-            # LEXICAL is a compatibility control. CELLS is the first candidate component.
+            # LEXICAL 仅作向后兼容对照；CELLS 起才作为候选增强组件，只有同时满足正确性、延迟预算且难例净增益 > 0 才启用。
             accept = r["mode"] != "LEXICAL" and correct and latency and gain > 0
             if accept:
                 best = r

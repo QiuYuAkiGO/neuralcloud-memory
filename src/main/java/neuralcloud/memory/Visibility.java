@@ -6,16 +6,39 @@ import com.google.gson.JsonObject;
 import java.sql.SQLException;
 import java.util.List;
 
+/**
+ * 阶段 2 跨会话受众可见性策略与原作者版本授权决策。
+ *
+ * <p>职责：
+ * <ul>
+ *   <li>生成统一的受众过滤 SQL 条件，供召回排名、原文读取、卡片目录与派生发布共享，确保越权候选在 Top-K 之前即被过滤。</li>
+ *   <li>处理经可信 QQ 渠道认证的原作者授权（grant）与撤销（revoke）命令；授权严格绑定到单条原文的精确修订版本。</li>
+ * </ul>
+ */
 final class Visibility {
+    /** 授予跨会话可见性权限的 HTTP 路由名。 */
     static final String GRANTS = "visibility-grants";
 
+    /** 判断路径是否属于授权/撤销命令（该类命令必须使用独立的渠道授权凭据调用）。 */
     static boolean isCommand(String route) {
         return GRANTS.equals(route) || route.matches("visibility-grants/[0-9a-f]{64}/revoke");
     }
 
+    /**
+     * 构造受众可见性 SQL 谓词，并按占位符顺序将参数追加到 {@code args}。
+     *
+     * <p>调用方在排名、原文窗口、卡片目录和派生发布处共用同一条件。
+     * <ul>
+     *   <li>{@code use=LOCAL}（兼容省略 use 的旧客户端）：仅限当前会话自身记录，且排除依赖其他会话来源的派生内容。</li>
+     *   <li>{@code use=READ/CITE}：允许当前会话记录，或已获针对当前修订版本的有效跨会话授权（CITE 包含 READ）。</li>
+     *   <li>对于仍在线（ONLINE）的派生记录，必须确保其全部递归依赖（{@code evidence_dependencies}）
+     *       在当前受众下均具备在线且可引用的 {@code CITE} 权限；一旦任一上游撤权或修订，派生正文立即对该受众隐藏。</li>
+     * </ul>
+     */
     // 在排名、原文窗口和派生发布处使用同一个受众条件。派生正文须可引用所有依赖。
     static String allowed(Access ctx, String use, List<Object> args) {
         args.add(ctx.scope());
+        // QQ 私聊外部受众不得读取 sensitive 隐私级别记录；非 QQ（控制台/内部）上下文按策略保留。
         String privacy =
                 ctx.peer() == null
                         ? ""
@@ -30,6 +53,8 @@ final class Visibility {
         args.add(ctx.scope());
         args.add(use);
         args.add(ctx.scope());
+        // 注意：跨会话授权只匹配当前最新修订（v.revision=r.revision），且状态为 ACTIVE。
+        // 非 ONLINE 项（如 RETRACTED/SOURCE_CHANGED）跳过依赖检查，以便读接口可向原有受众返回失效状态而非正文。
         return """
             ((r.conversation=? %s) OR (v.revision=r.revision AND EXISTS (
                SELECT 1 FROM visibility_grants g WHERE g.record_id=r.id AND g.revision=v.revision
@@ -43,8 +68,15 @@ final class Visibility {
                 .formatted(privacy);
     }
 
+    /** 授权或撤销决策结果，供 Ledger 写入变更流与持久回执。 */
     record Decision(String record, long revision, String grant) {}
 
+    /**
+     * 执行原作者授予或撤销跨会话权限的数据库写入。
+     *
+     * <p>就绪与安全条件：HTTP 入口已核验独立渠道凭据与机器人账号一致；此处再次要求
+     * {@code ORCHESTRATOR} 角色与可信 QQ 私聊身份，并逐项核对原消息的渠道平台、账号、发件人与精确修订号。
+     */
     static Decision decide(Store store, Access ctx, String route, JsonObject cmd)
             throws SQLException {
         ctx.requireQq();
@@ -58,6 +90,7 @@ final class Visibility {
             String id = id(ref, "record_id"), use = one(cmd, "use", "READ", "CITE");
             long rev = number(ref, "revision", 1, Long.MAX_VALUE);
             String target = text(cmd, "target_conversation_id", 256);
+            // 仅原作者本人可授予自己发出的 QQ 观察记录，显示名与模型文本不能代替渠道发件人身份。
             var rows =
                     store.rows(
                             """
@@ -71,6 +104,7 @@ final class Visibility {
                             ctx.peer());
             if (rows.isEmpty()) throw denied();
             var row = rows.getFirst();
+            // 同会话天然具备本会话访问权，禁止向原会话重复颁发跨会话授权。
             if (target.equals(get(row, "conversation"))) throw invalid("target_conversation_id");
             if (num(row, "revision") != rev || !get(row, "status").equals("ONLINE"))
                 throw conflict("SOURCE_CHANGED");
@@ -94,6 +128,7 @@ final class Visibility {
                     reason);
             return new Decision(id, rev, grant);
         }
+        // 撤销分支：从路由 visibility-grants/{grant_id}/revoke 提取授权 ID，并核验调用方即为原授权作者。
         keys(cmd, common);
         String grant = route.split("/")[1];
         var rows =

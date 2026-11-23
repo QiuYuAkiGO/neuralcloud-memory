@@ -8,7 +8,19 @@ import java.sql.*;
 import java.time.Instant;
 import java.util.*;
 
+/**
+ * 权威账本写入引擎：处理入账（ingest）、派生发布（candidates）、更正/撤回（corrections）
+ * 以及跨会话授权/撤销（visibility-grants）的统一事务落盘与幂等回执。
+ *
+ * <p>核心不变量：
+ * <ul>
+ *   <li>以 {@code (source_instance, event_id)} 实现严格幂等：同键同内容返回原回执，同键异内容返回 409。</li>
+ *   <li>记录主体、修订版本、来源依赖、当前全文索引、变更流与持久回执在单一 SQLite 事务内原子提交。</li>
+ *   <li>原文编辑、撤回或印象替换会在同一事务中级联失效依赖其结果的下游派生项，并向被替代的旧记录补发变更事件。</li>
+ * </ul>
+ */
 final class Ledger {
+    /** 所有写命令共用的顶层必选字段前缀。 */
     private static final String COMMAND = "context source_instance event_id ";
     private final Store store;
 
@@ -16,6 +28,10 @@ final class Ledger {
         this.store = store;
     }
 
+    /**
+     * {@code GET /v2/receipts} 入口：按写入方实例与事件 ID 查询持久回执，供 Harness 在超时后对账恢复。
+     * 仅允许与服务配置的 {@code sourceInstance} 一致的写入方查询，避免越权探测回执。
+     */
     JsonObject receipt(String source, String event) throws SQLException {
         if (!source.equals(store.writer)) throw denied();
         var rows =
@@ -31,11 +47,16 @@ final class Ledger {
         return r;
     }
 
+    /**
+     * 统一写命令入口：先核验调用角色与写入方身份，再执行幂等去重，随后分发到授权决策、更正或新增路径，
+     * 最后将最终提交水位 {@code store.head()} 与完整原始命令记入 {@code receipts} 表。
+     */
     JsonObject write(String route, JsonObject cmd) throws SQLException {
         var ctx = Access.from(store, cmd);
         ctx.write();
         String source = text(cmd, "source_instance", 128), event = text(cmd, "event_id", 256);
         if (!source.equals(store.writer)) throw denied();
+        // 幂等对账：解析历史命令 JSON 为树做结构比较（忽略键顺序），路由或载荷不同则拒绝重放。
         var prev =
                 store.rows(
                         "SELECT op,command FROM receipts WHERE source=? AND event=?",
@@ -86,6 +107,17 @@ final class Ledger {
         return receipt(source, event);
     }
 
+    /**
+     * 新增一条原始记录（{@code /v2/ingest}）或派生候选（{@code /v2/candidates}）。
+     *
+     * <p>关键业务校验：
+     * <ul>
+     *   <li>原始入账支持 observation/self_expression/tool_* /delivery_receipt，仅 self_expression 允许携带已送达的 source_refs。</li>
+     *   <li>派生候选支持 summary/impression（impression 仅限 author=MASTER），逐一复核所有 source_refs 在当前受众下处于 ONLINE 且可 CITE。</li>
+     *   <li>若任一来源为 sensitive，则派生项继承 sensitive 隐私等级，且禁止在 QQ 私聊受众中创建。</li>
+     *   <li>若携带 {@code replaces_impression}（仅 ORCHESTRATOR），验证新叶子均为当前活跃原始证据后，在同一事务中退役旧印象并失效其下游。</li>
+     * </ul>
+     */
     private String insert(Access ctx, JsonObject cmd, boolean candidate) throws SQLException {
         String base = "kind content occurred_at speaker source_venue privacy";
         if (candidate) keys(cmd, COMMAND + base + " source_refs author topic replaces_impression");
@@ -165,6 +197,7 @@ final class Ledger {
                     if (row == null
                             || !get(row, "status").equals("ONLINE")
                             || num(row, "revision") != expected) throw conflict("SOURCE_CHANGED");
+                    // 修订印象时，新证据必须是直接的一手记录（非派生、无 source_refs）且其断言当前仍有效，防止用过时或二次转述覆盖印象。
                     if (cmd.has("replaces_impression")
                             && (!Set.of(
                                                     "observation",
@@ -198,6 +231,7 @@ final class Ledger {
             String oldId = id(old, "record_id");
             var prior = current(ctx.scope(), oldId);
             long expected = number(old, "revision", 1, Long.MAX_VALUE);
+            // 禁止循环依赖（新印象来源不得引用被替代的旧印象），且旧印象必须匹配版本并处于 ONLINE 或 SOURCE_CHANGED。
             if (prior == null
                     || !get(prior, "kind").equals("impression")
                     || !Set.of("ONLINE", "SOURCE_CHANGED").contains(get(prior, "status"))
@@ -208,8 +242,7 @@ final class Ledger {
                                     id,
                                     oldId)
                             .isEmpty()) throw conflict("SOURCE_CHANGED");
-            // The replacement, its new verified leaves and retirement of dependent summaries commit
-            // together.
+            // 新印象、其经核验的新叶子依赖以及旧印象下游摘要的退役在同一事务内原子提交。
             var visible = new Reader(store).currentFor(ctx, "CITE", oldId);
             if (visible == null) throw conflict("SOURCE_CHANGED");
             var oldBody = parse(get(prior, "body"));
@@ -217,6 +250,7 @@ final class Ledger {
                 if (ctx.peer() != null) throw denied();
                 body.addProperty("privacy", "sensitive");
             }
+            // 若旧印象仍在线且新印象未指定新标题，自动沿用旧 topic 保持事项卡归类连贯。
             if (get(prior, "status").equals("ONLINE") && !body.has("topic") && oldBody.has("topic"))
                 body.add("topic", oldBody.get("topic"));
             retire(prior, oldId);
@@ -226,6 +260,7 @@ final class Ledger {
         return id;
     }
 
+    /** 校验 QQ 渠道元数据与调用上下文的一致性，防止伪造私聊/群聊来源标识或冒用发件人。 */
     private void channel(Access ctx, JsonObject channel) {
         keys(channel, "platform account_id sender_id message_id conversation_id type");
         one(channel, "platform", "qq");
@@ -242,6 +277,7 @@ final class Ledger {
         } else if (!scope.matches("group:onebot:" + account + ":[1-9][0-9]*")) throw denied();
     }
 
+    /** 校验 {@code reply_to}：必须指向同一会话中当前 ONLINE 的其他记录的精确修订版本。 */
     private void validateReply(Access ctx, JsonObject parent, String ownId) throws SQLException {
         keys(parent, "record_id revision");
         String parentId = id(parent, "record_id");
@@ -253,6 +289,10 @@ final class Ledger {
                 || num(row, "revision") != revision) throw conflict("SOURCE_CHANGED");
     }
 
+    /**
+     * 校验显式事项断言 {@code assertion}：检查有效区间（{@code valid_until > effective_at}）、
+     * 会议排期时间格式，以及 {@code supersedes_ref} 所指前序记录必须同会话在线、同主题同谓词且生效时间不晚于本条。
+     */
     private void validateAssertion(Access ctx, JsonObject a, String ownId) throws SQLException {
         keys(a, "subject_id predicate value effective_at supersedes_ref valid_until");
         String subject = text(a, "subject_id", 256), predicate = text(a, "predicate", 128);
@@ -280,6 +320,18 @@ final class Ledger {
             throw invalid("supersedes_ref");
     }
 
+    /**
+     * {@code POST /v2/corrections} 入口：按乐观锁（{@code expected_revision}）执行正文替换（REPLACE）或撤回（RETRACT）。
+     *
+     * <p>边界与副作用：
+     * <ul>
+     *   <li>仅原写入主体或 ORCHESTRATOR 可修订；版本号不匹配返回 {@code REVISION_CONFLICT}，非 ONLINE 返回 {@code SOURCE_CHANGED}。</li>
+     *   <li>无论 REPLACE 还是 RETRACT，均在同一事务内令绑定旧版本的活跃跨会话授权失效（置为 SOURCE_CHANGED），
+     *       并级联使所有下游在线派生记录转为 SOURCE_CHANGED。</li>
+     *   <li>REPLACE 时 {@code topic}/{@code reply_to} 省略则保留原值、传 null 则清除、传新值则覆盖；
+     *       {@code assertion} 与 {@code identity} 默认清除，需由调用方按新正文显式重提。</li>
+     * </ul>
+     */
     private String correct(Access ctx, JsonObject cmd) throws SQLException {
         keys(
                 cmd,
@@ -332,6 +384,7 @@ final class Ledger {
                 expected + 1,
                 op.equals("RETRACT") ? "RETRACTED" : "ONLINE",
                 id);
+        // 授权精确绑定原修订版本：一旦原文被编辑或撤回，既有活跃授权自动失效，须由原作者对新版本重新授权。
         store.update(
                 "UPDATE visibility_grants SET status='SOURCE_CHANGED' WHERE record_id=? AND"
                         + " status='ACTIVE'",
@@ -342,6 +395,7 @@ final class Ledger {
         return id;
     }
 
+    /** 将被新印象替换的旧印象原子退役（版本递增、正文置空、状态转为 RETRACTED）并级联失效其下游派生。 */
     private void retire(JsonObject old, String id) throws SQLException {
         long revision = num(old, "revision") + 1;
         var body = parse(get(old, "body"));
@@ -351,8 +405,11 @@ final class Ledger {
         version(id, revision, get(old, "occurred"), body, "RETRACT");
     }
 
+    /**
+     * 在同一事务内递归查找所有直接/间接依赖 {@code id} 的在线派生记录，将其置为 {@code SOURCE_CHANGED}、
+     * 移出全文索引并追加变更事件（派生项自身的 revision 保持不变，以便消费者识别“版本未变但来源已失效”）。
+     */
     private void invalidateDescendants(String id) throws SQLException {
-        // Invalidate descendants in the same transaction. Their own revision can remain unchanged.
         var dependents =
                 store.rows(
                         """
@@ -368,7 +425,11 @@ SELECT r.id,r.revision FROM records r JOIN deps USING(id) WHERE status='ONLINE'"
         }
     }
 
-    // A later announcement preserves the old transcript but changes its schedule's validity.
+    /**
+     * 为涉及显式替代（{@code supersedes_ref}）的前序记录追加 {@code ASSERTION_UPDATED} 变更。
+     * 业务原因：新通知不会撤销或修改旧通知的原话，但会改变该事项在旧通知之后的当前有效性；
+     * 曾只读过旧通知的 Worker 依赖该变更事件触发下一轮重读与状态刷新。
+     */
     private void notifyPredecessors(JsonObject first, JsonObject second) throws SQLException {
         var ids = new LinkedHashSet<String>();
         for (var body : new JsonObject[] {first, second}) {
@@ -382,6 +443,7 @@ SELECT r.id,r.revision FROM records r JOIN deps USING(id) WHERE status='ONLINE'"
         }
     }
 
+    /** 查询指定会话下某记录的当前主表与最新修订正文，不存在时返回 null。 */
     JsonObject current(String scope, String id) throws SQLException {
         var rows =
                 store.rows(
@@ -393,6 +455,7 @@ WHERE r.conversation=? AND r.id=?""",
         return rows.isEmpty() ? null : rows.getFirst();
     }
 
+    /** 向全局单调递增变更流 {@code changes} 追加一条事件记录（不存正文，仅存操作类型与目标版本）。 */
     private void change(String id, long rev, String op) throws SQLException {
         store.update(
                 "INSERT INTO changes(op,record_id,revision,recorded_at) VALUES(?,?,?,?)",
@@ -402,12 +465,17 @@ WHERE r.conversation=? AND r.id=?""",
                 utc(Instant.now()));
     }
 
+    /** 从基础全文表 {@code search} 和分域词表 {@code cell_search} 中移除记录索引。 */
     private void unindex(String id) throws SQLException {
         store.update(
                 "DELETE FROM cell_search WHERE rowid=(SELECT rowid FROM records WHERE id=?)", id);
         store.update("DELETE FROM search WHERE rowid=(SELECT rowid FROM records WHERE id=?)", id);
     }
 
+    /**
+     * 落盘新修订版本：归一化断言到期时间、写入变更流与 {@code revisions} 表、更新时态索引 {@code claim_times}，
+     * 并对非撤回版本重建基础 FTS 与分域 FTS 索引（撤回操作只清空旧索引）。
+     */
     private void version(String id, long rev, String occurred, JsonObject body, String op)
             throws SQLException {
         if (body.has("assertion") && object(body, "assertion").has("valid_until")) {

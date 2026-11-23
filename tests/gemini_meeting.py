@@ -1,4 +1,8 @@
-"""Exercise a complete meeting case through ConsoleMain with the official Gemini Chat Worker."""
+"""经由 Harness ConsoleMain 与官方真实 Gemini Chat Worker 运行完整的会议改期端到端验收。
+
+测试覆盖：原始会议通知与改期原因、跨轮复盘先后顺序、原安排与现安排溯源、提醒工具尝试（未确认）与
+外部执行器回执（已确认）、渠道正文编辑与下游摘要失效，以及撤回最新通知后恢复到唯一仍有效原安排。
+"""
 
 import argparse
 import json
@@ -27,6 +31,7 @@ from acceptance import (
 
 
 def previous_services(manifest):
+    """解析 `--resume-demo` 指向的旧批次 demo.json，复用其本地端口、记忆账本与 Harness 审计目录。"""
     if manifest is None:
         return {}
     data = json.loads(manifest.read_text(encoding="utf-8"))
@@ -41,6 +46,8 @@ def previous_services(manifest):
 
 
 class GeminiMeeting:
+    """管理单次真实 Gemini 会议改期验收会话，逐轮核对审计链、SQLite 交付登记与回执证据。"""
+
     def __init__(self, pair, endpoint, timeout):
         self.pair = pair
         self.timeout = timeout
@@ -58,10 +65,15 @@ class GeminiMeeting:
         )
 
     def save(self):
+        """将当前轮次报告与完整审计链落盘至本批次证据目录。"""
         dump(self.pair.out / "gemini-case.json", self.report)
         dump(self.pair.out / "meeting-audit.json", self.events)
 
     def turn(self, step, message, observation=None):
+        """发送一轮控制台消息并完成端到端取证：
+        校验本轮审计闭环（入站 -> 真实 Gemini 规划用量 -> 回复 -> 控制台写出）、回读 Memory 确认双向原文已持久化，
+        并只读检查 Harness 本地 SQLite 中 `inputs`/`input_evidence` 的实际交付状态与版本绑定。
+        """
         offset = len(self.events)
         answer = self.pair.msg(self.chain, message, observation, timeout=self.timeout)
         self.events = self.pair.audit(self.chain)
@@ -157,15 +169,18 @@ class GeminiMeeting:
         return evidence
 
     def check(self, name, condition):
+        """断言单个语义或证据检查点通过，并将其追加到报告中。"""
         if not condition:
             raise AssertionError(name)
         self.report["checks"].append(name)
         self.save()
 
     def ingest(self, suffix, text, **fields):
+        """以当前会话链为前缀直接向 Memory 提交一条观察或工具记录。"""
         return self.pair.api("ingest", event(self.chain + "-" + suffix, text, scope=self.scope, **fields))
 
     def correct(self, target, suffix, operation, **fields):
+        """按乐观锁版本向 Memory 提交渠道修订（REPLACE）或撤回（RETRACT）。"""
         return self.pair.api(
             "corrections",
             dict(
@@ -182,9 +197,11 @@ class GeminiMeeting:
 
     @staticmethod
     def cited(turn, target):
+        """判断目标记录的精确版本是否既作为交付项本身、又作为来源引用送达了本轮模型输入。"""
         return any(row["ref"] == ref(target) and ref(target) in row["sources"] for row in turn["delivered"])
 
     def run(self):
+        """执行完整会议改期验收剧本：两轮通知 -> 改期复盘 -> 核对原/现安排 -> 提醒未决/已决 -> 编辑失效 -> 撤回回退。"""
         old = self.turn(
             "original-message",
             "例会定在周五 15 点。",
@@ -318,7 +335,8 @@ class GeminiMeeting:
 
 
 def schedule_mention(text, slot):
-    # Match the two parts of the schedule together, allowing normal Chinese paraphrases.
+    """在自然语言中文回答中匹配指定会议档期（星期/日期 + 对应小时），容忍常见口语表述差异。"""
+    # 归一化全角/空格/Markdown 符号后，在同一子句窗口内同时匹配日期与小时。
     compact = re.sub(r"[\s*_\x60]", "", unicodedata.normalize("NFKC", text))
     day, hour = {
         "friday": (
@@ -339,11 +357,12 @@ def describes(text, slot):
 
 
 def states_arrangement(answer, slot, *, historical=False):
+    """判断回答是否准确将 `slot` 归类为“原安排（historical=True）”或“当前有效安排（historical=False）”。"""
     if not describes(answer, slot):
         return False
     if not any(describes(answer, other) for other in ("friday", "saturday", "sunday") if other != slot):
         return True
-    # When the reply gives two times, check which one it calls original or effective.
+    # 当回答同时提及两个时间点时，需在分句粒度核对哪个时间被标定为历史安排或当前有效安排。
     marker = (
         r"原[来先本]|最初|起初|一开始|历史"
         if historical
@@ -356,7 +375,7 @@ def states_arrangement(answer, slot, *, historical=False):
             continue
         if re.search(marker, clause):
             return True
-        # “周五 15 点。”不过那是历史安排。 The demonstrative qualifies the preceding notice.
+        # 兼容跨分句回指写法（例如“‘周五 15 点。’不过那是历史安排。”），指示代词修饰紧邻的前一句通知。
         if historical and i + 1 < len(clauses) and re.match(
                 r"(?:这|那|该)(?:条|个|项|则)?(?:是|属于|只是)(?:当时的|之前的)?历史安排", clauses[i + 1]):
             return True
@@ -364,6 +383,7 @@ def states_arrangement(answer, slot, *, historical=False):
 
 
 def uncertain(answer):
+    """判断回答是否如实表达了“仅有工具尝试、尚无执行回执因此无法确认已更新”的不确定性。"""
     return (
         re.search(
             r"未知|不确定|待(?:核实|确认)|(?:等待|还在等|等候).{0,6}回执|(?:不能|无法|没法|不足以|还不能).{0,10}(?:确认|确定|断定|证明)|"
@@ -375,7 +395,8 @@ def uncertain(answer):
 
 
 def confirmed_update(answer):
-    # A reply may contrast a previously pending attempt with the now confirmed result.
+    """判断回答中是否存在明确肯定“提醒清单已更新”的分句（兼容先对比未决尝试再转折确认结果的句式）。"""
+    # 回答可能先回顾先前待确认状态，再转折说明现已取得回执；按分句拆分以避免被前半句的否定词误杀。
     clauses = re.split(r"[。！？；;\n]|(?:但是|不过|现在则)", answer)
     return any(
         not uncertain(c)
@@ -423,9 +444,10 @@ def main():
         cfg["maxOutputTokens"] = str(args.max_output_tokens)
         config = pair.out / "gemini-worker.properties"
         props(config, cfg)
+    # 隔离凭据边界：只把 Gemini API Key 注入 Harness 进程环境，Memory 进程不持有外部模型密钥。
     pair.harness_env = pair.env.copy()
     pair.env.pop(key_env)
-    # The JVM uses its default TLS roots and the repository's configured CONNECT proxy.
+    # JVM 沿用系统默认 TLS 根证书库以及 Harness 配置中声明的官方代理。
     props(
         pair.console_config,
         dict(

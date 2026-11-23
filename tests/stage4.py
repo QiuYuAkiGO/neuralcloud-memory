@@ -1,4 +1,12 @@
-"""Acceptance of audience cards, bounded Master context, offline catch-up and impression revision."""
+"""阶段 4 分域人物/事项卡、受控 Master 热索引、离线增量整理与印象修订的端到端验收脚本。
+
+覆盖场景：
+1. 离线整理关闭与分页中断重启：积压期间原文查证仍可用，重启后保留流身份并从持久水位续追。
+2. 两跳回复指代按当时修订和受众解析、相对日期锚定原发言日历日。
+3. 重复摘要叶子来源去重、外部聊天指令仅作引用数据保存、跨受众目录零泄露。
+4. 未决承诺/期限置顶与过期退出、后台整理与前台同卡并发、真实本机 Master 热目录分词计费。
+5. Master `/memory revise` 原子修订印象并退役旧印象、墙钟自然到期刷新与后台定时追平、改标题即时重建目录。
+"""
 import json
 import sqlite3
 import re
@@ -15,14 +23,17 @@ MASTER = "http://127.0.0.1:18081"
 
 
 def scoped(route, **fields):
+    """按目标路由构造阶段 4 默认会话上下文（organize 需 ORCHESTRATOR，其余读接口用 MASTER）。"""
     return dict(context=context(SCOPE, "ORCHESTRATOR" if route == "organize" else "MASTER"), **fields)
 
 
 def refstr(src):
+    """将 RecordRef 格式化为 `/memory revise` 命令使用的 `record_id@revision` 语法。"""
     return src["record_id"] + "@" + str(src["revision"])
 
 
 def run_case():
+    """执行阶段 4 全套卡片目录、离线整理、并发延迟与真实本机 Master 联调验收。"""
     r = Run(ROOT.parent / "neuralcloud-harness")
     evidence = {"checks": [], "jars": r.jar_hashes, "run": r.out.name}
 
@@ -60,7 +71,7 @@ def run_case():
         health = r.memory()
         receipts = seed(r)
 
-        # The same long-term queries and raw evidence are evaluated on both sides of maintenance.
+        # 1. 在后台整理开启前后对同一批长期事项分别评估：验证积压期间 L2/recall 查证不受影响，重启后从断点水位追平。
         def tasks():
             return {
                 t: dict(
@@ -97,7 +108,7 @@ def run_case():
             all(on[t]["entries"] == 1 and on[t]["raw"] == off[t]["raw"] for t in TOPICS),
             tasks=on,
         )
-        # Pure two-hop case: descendant terms and titles have no lexical overlap with the query.
+        # 2. 纯两跳指代验证：下游回复与查询无任何字面重叠，仅靠精确版本 reply_to 边召回；中间节点修订后当前查询断开、历史水位仍可还原。
         edge_scope = "console:edge-check"
         anchor = r.api("ingest", event("edge-root", "玄鸟折页", scope=edge_scope))
         mid = r.api("ingest", event("edge-middle", "由我接手。", scope=edge_scope, reply_to=ref(anchor)))
@@ -211,7 +222,7 @@ def run_case():
             first=directory[0],
             expired=ref(expired),
         )
-        # Time the same front-end card with the organizer idle vs actively catching up.
+        # 3. 对比空闲与大批量入账并发整理期间的前台同卡延迟，确认后台整理不阻塞前台卡片读取。
         q = scoped("cards", view="L1", axis="SUBJECT", title=TOPICS[0], limit=12)
 
         def measure():
@@ -260,7 +271,7 @@ def run_case():
             busy_card_p95_ms=p95(busy),
         )
 
-        # Use the real 27B Master and the tokenizer served by its configured inference endpoint.
+        # 4. 接入本机真实 llama.cpp 27B Master 与同端点 `/tokenize` 分词器，核验热索引常驻块始终不超过 token 预算。
         model = send(MASTER + "/v1/models")["data"][0]["id"]
         config = dict(
             line.split("=", 1) for line in r.console_config.read_text(encoding="utf-8").splitlines()
@@ -303,7 +314,7 @@ def run_case():
             off_answer=off_answer,
             on_answer=on_answer,
         )
-        # Only the explicit Master operator command can authorize revision. The quoted material is data.
+        # 5. 印象修订权限边界：只有控制台显式 `/memory revise` 命令可授权修订印象，外部引用文本仅作为纯数据。
         source = r.api(
             "ingest", event("plain-fact", "小岚目前只喝无糖的乌龙茶。", scope=SCOPE, speaker="小岚", topic="饮茶偏好")
         )
@@ -354,9 +365,9 @@ def run_case():
         before = r.api("health")["head_seq"]
         answer = send_master("请只转述书友关于午餐的原话，说明是谁说的，不替他做任何安排。")
         after_head = r.api("health")["head_seq"]
-        # Master replies on its own node; no tool command or channel side effect can originate in quoted text.
+        # 6. 外部指令防注入验证：Master 仅在自身节点转述带来源的原话，不得因引语内容触发账本写入或外部副作用。
         check("引用外部指令后账本没有执行写入", before == after_head and "午餐" in answer, answer=answer, head=after_head)
-        # Master messages do not append ledger observations. Wall-clock expiry alone must reset the next input.
+        # 7. 墙钟自然到期场景：Master 提问不追加账本水位，但超过 valid_until 后下一轮上下文必须自动重置，空闲整理需回收过期指针。
         timed_scope = "console:wall-clock34"
         start = datetime.now(timezone.utc)
         expiration = start + timedelta(seconds=12)
@@ -452,7 +463,7 @@ def run_case():
             scheduled_interval_test_seconds=1,
             default_seconds=30,
         )
-        # A retitle removes the old pointer immediately even before the next catalog tick.
+        # 8. 改标题即时失效：即便尚未触发下一次目录整理，旧标题对应的旧版本指针因 revision 变更立即退出可见集。
         updated = r.api(
             "corrections",
             dict(
@@ -471,7 +482,7 @@ def run_case():
         assert not card("明信片装订")
         all_pages()
         check("标题更正使旧目录立即退出并按新版本重建", card("明信片归档")[0]["ref"] == ref(updated))
-        # Recount every delivered resident block, including the expiring, external-quote and empty-directory turns.
+        # 9. 全量复核所有已送达的热目录块（含到期、外部引语与空目录轮次），验证实模分词数与本地 inputs 持久化内容一致。
         audits = [
             e["data"]
             for chain in ("review34", "wall-clock34")

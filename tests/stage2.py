@@ -1,4 +1,12 @@
-"""Replay versioned author grants through two JVMs, OneBot and the actual Worker model interfaces."""
+"""阶段 2 跨会话原作者版本授权与撤权传播的双 JVM 端到端验收脚本。
+
+覆盖场景：
+1. 阶段 1 旧库原地迁移（保留流标识、序号、回执与原记录）。
+2. OpenQQ 私聊认证原作者授予 READ/CITE、拒绝冒名代授与错凭据调用。
+3. 群通知获准后进入目标私聊/控制台与卡片目录，而未授权的私聊改期原因始终零泄露。
+4. 撤权后同版本摘要卡、已发引用回复与历史窗口即时隐藏，并覆盖进程中断续传、晚到登记竞态与 Task Worker 行动前门禁。
+5. 编辑与撤回令绑定旧版本的授权自动失效；追加 `--gemini` 时经真实 Gemini 验证授权前、授权后与撤销后三态。
+"""
 
 import argparse
 import json
@@ -18,18 +26,22 @@ from urllib.parse import urlencode
 from jsonschema import Draft202012Validator
 from acceptance import ROOT, HIDDEN, Run, context, dump, event, props, query, ref, send, stop
 
+# 测试用机器人账号、原作者账号、目标受众账号及隔离测试会话标识
 ACCOUNT, AUTHOR, OTHER = "12345", "67890", "78901"
 GROUP = "group:onebot:12345:23456"
 TEAM = "console:p2-team"
+# 分别作为“允许跨会话授权的群内地点”和“严禁泄露的私聊改期原因”哨兵文本
 PLACE, REASON = "雪松厅", "靛青样机晚到"
 QUESTION = "请查例会的地点和改期原因，记录里分别怎么说？"
 
 
 def private(peer):
+    """构造指定 QQ 用户的 OneBot 单聊会话 ID。"""
     return "c2c:onebot:" + ACCOUNT + ":" + peer
 
 
 def audience(scope, role="MASTER"):
+    """按目标会话构造受众上下文；c2c 私聊会话自动附带对应的 qq(account_id, peer_id)。"""
     qq = dict(account_id=ACCOUNT, peer_id=scope.split(":")[-1]) if scope.startswith("c2c:") else None
     return context(scope, role, qq)
 
@@ -39,9 +51,12 @@ def serialized(value):
 
 
 class Case:
+    """阶段 2 授权与撤权传播验收驱动器：配置独立渠道授权凭据并协调多 Worker 与 OneBot 切换。"""
+
     def __init__(self, run):
         self.run = run
         self.ids = count(81000)
+        # 为跨会话授权命令生成独立于普通服务凭据的渠道专用 Bearer 凭据。
         self.token = secrets.token_urlsafe(36)
         self.first_request = threading.Event()
         self.release_model = threading.Event()
@@ -54,6 +69,9 @@ class Case:
         run.http.model_response = run.proxy.model_response = self.model
 
     def model(self, body):
+        """自定义可控模型回调：同时服务 Chat Worker（Gemini 协议）与 Master/Task Worker（OpenAI 工具协议），
+        并支持在首轮请求处暂停（模拟进程崩溃）或在 Task Worker 行动前注入实时撤权。
+        """
         if self.pause_model:
             self.pause_model = False
             self.first_request.set()
@@ -84,6 +102,7 @@ class Case:
         return dict(model=body["model"], choices=[dict(finish_reason=reason, message=message)])
 
     def harness(self, peer=AUTHOR):
+        """重启 Harness 并将 OneBot 私聊白名单切换到指定对端用户，模拟不同 QQ 用户与机器人对话。"""
         run = self.run
         if run.hproc and run.hproc.poll() is None:
             stop(run.hproc)
@@ -105,6 +124,7 @@ class Case:
         return self.run.onebot.ask(text, next(self.ids), **kwargs)
 
     def source(self, chain, text):
+        """从 Harness 审计链中反查指定 QQ 入站消息落盘后的精确 RecordRef（record_id + revision）。"""
         for _ in range(80):
             events = self.run.audit(chain)
             entry = next(e for e in events if e["type"] == "qq_message" and e["data"]["text"] == text)
@@ -135,6 +155,7 @@ class Case:
         raise AssertionError("inbound receipt missing")
 
     def decision(self, record, target, use="CITE"):
+        """通过原作者 QQ 私聊发送 `/memory grant` 命令并返回服务端颁发的 64 位授权 ID。"""
         answer = self.ask(
             f"/memory grant {record['record_id']}@{record['revision']} {target} {use} 验证会议范围"
         )
@@ -143,6 +164,7 @@ class Case:
         return match.group(1)
 
     def revoke(self, grant):
+        """通过原作者 QQ 私聊发送 `/memory revoke` 命令撤销指定授权。"""
         answer = self.ask("/memory revoke " + grant + " 会议范围已变更")
         assert answer == "已撤销授权 " + grant, answer
 
@@ -161,8 +183,9 @@ class Case:
         ]
 
     def exercise(self):
+        """执行阶段 2 全量可控挡板验收流程（迁移、授权边界、派生卡与撤权、崩溃恢复、竞态、行动门禁与修订失效）。"""
         r = self.run
-        # Reopen a populated P1 ledger so migration also covers its stream, sequence and durable receipt.
+        # 1. 手工预置一份带历史记录的阶段 1（schema v2）账本，验证升级后 stream_id、水位与旧回执完全保留。
         r.ledger.mkdir()
         stream = str(uuid.uuid4())
         old = event("stage-one-event", "旧库的原通知。", scope="console:legacy")
@@ -321,6 +344,9 @@ class Case:
         r.check("edition-and-retraction-expire-exact-version-grants", revised=ref(revised), grant=new_grant)
 
     def verify_author(self, record, target):
+        """直接验证 `/v2/visibility-grants` 与 `/revoke` 接口边界：必须使用独立渠道凭据、
+        核对原作者私聊身份、校验精确修订号、符合 OpenAPI Schema 且同 event_id 重试幂等。
+        """
         r = self.run
         route = "visibility-grants"
         cmd = dict(
@@ -382,6 +408,9 @@ class Case:
         r.check("author-only-decisions-idempotent-command-and-durable-receipts", grant=grant, revoke=receipt)
 
     def restart_pending(self, stream):
+        """崩溃恢复场景：当撤权生成的更正通知处于 PREPARED（尚未送达模型）时强杀 Harness 并重启双服务，
+        验证 Chat Worker 与 Master 两个 Worker 均能继续收到“原依据已失效”通知，且通知送达后清空旧前缀、不产生重复渠道外发。
+        """
         r = self.run
         count_before = len(r.onebot.deliveries)
         self.pause_model = True
@@ -419,6 +448,9 @@ class Case:
         r.check("prepared-correction-survives-process-loss-for-two-workers-and-clears-prefix")
 
     def late_registration(self, record):
+        """晚到读取登记竞态：经 Relay 挂起已返回旧数据的召回响应，在挂起期间撤销授权并推进游标，
+        放行后验证该旧召回无法对外发布已撤权内容，且下一轮模型首个输入收到失效提示。
+        """
         r = self.run
         grant = self.decision(record, TEAM)
         self.harness()
@@ -440,6 +472,9 @@ class Case:
         r.check("late-read-registration-cannot-publish-revoked-source")
 
     def action_gate(self, record):
+        """外部行动前门禁：调用 Harness 的 StageTwoActionProbe 对比未撤权与行动前瞬间撤权两种情况，
+        确认 Task Worker 在执行外部动作前会实时复核当前授权，已撤权则阻止执行（samples=0）。
+        """
         r = self.run
         grant = self.decision(record, "console:p2-actions")
         cp = os.pathsep.join([str(r.hjar), str(r.harness / "java/target/test-classes")])
@@ -475,6 +510,9 @@ class Case:
         )
 
     def live_gemini(self):
+        """真实 Gemini 端到端验证：同一目标私聊分别在“授权前 / 授权后 / 撤销后”三次提问，
+        核实群内地点随授权状态精确显现与撤除，而未授权的私聊改期原因全程零泄露。
+        """
         r = self.run
         config = r.harness / "java/src/main/resources/config/chat-worker-gemini.properties"
         settings = dict(
