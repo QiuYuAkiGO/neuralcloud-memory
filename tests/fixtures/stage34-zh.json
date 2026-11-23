@@ -1,0 +1,590 @@
+{
+  "protocol": {
+    "candidate_limit": 12,
+    "context_items": 5,
+    "excerpt_codepoints": 2048,
+    "warm_rounds": 10,
+    "chat_repeats": 25,
+    "recall_p95_ms": 50,
+    "chat_p95_delta_ms": 150,
+    "hot_tokens": 96,
+    "batch_changes": 16,
+    "eligible": "难例 Recall@5 高于阶段1，归属100%，过期证据0，超预算不开启。按阶段依次启用，后续组件须有额外难例命中。"
+  },
+  "events": [
+    {
+      "event_id": "zh34-m1",
+      "scope": "console:review34",
+      "content": "青鹭评审原定在周五十五点。",
+      "topic": "青鹭评审",
+      "speaker": "小林",
+      "source_venue": "实验室排班群",
+      "occurred_at": "2026-11-18T09:00:00+08:00",
+      "assertion": {
+        "subject_id": "青鹭评审",
+        "predicate": "scheduled_for",
+        "value": "2026-11-20T15:00:00+08:00",
+        "effective_at": "2026-11-18T09:00:00+08:00"
+      }
+    },
+    {
+      "event_id": "zh34-m2",
+      "scope": "console:review34",
+      "content": "那间屋子漏水了，设备科得先修顶。",
+      "topic": "青鹭评审",
+      "speaker": "阿岚",
+      "source_venue": "实验室排班群",
+      "occurred_at": "2026-11-18T09:02:00+08:00",
+      "reply_to": {
+        "record_id": "acc6c430b6d30e97c14c3e849018fe93e872fcdf81dffa68ac64d35c14c0b480",
+        "revision": 1
+      }
+    },
+    {
+      "event_id": "zh34-m3",
+      "scope": "console:review34",
+      "content": "那就改到周六十点，在红杉厅碰头。",
+      "topic": "青鹭评审",
+      "speaker": "小林",
+      "source_venue": "实验室排班群",
+      "occurred_at": "2026-11-19T09:00:00+08:00",
+      "reply_to": {
+        "record_id": "7fa7df37095115713437b6538e538d4ded4ec8a2b538c8b213a2c891af4e81d6",
+        "revision": 1
+      },
+      "assertion": {
+        "subject_id": "青鹭评审",
+        "predicate": "scheduled_for",
+        "value": "2026-11-21T10:00:00+08:00",
+        "effective_at": "2026-11-19T09:00:00+08:00",
+        "supersedes_ref": {
+          "record_id": "acc6c430b6d30e97c14c3e849018fe93e872fcdf81dffa68ac64d35c14c0b480",
+          "revision": 1
+        }
+      }
+    },
+    {
+      "event_id": "zh34-m4",
+      "scope": "console:review34",
+      "content": "钥匙在二楼前台，找值班员签字领。",
+      "topic": "青鹭评审",
+      "speaker": "阿岚",
+      "source_venue": "实验室排班群",
+      "occurred_at": "2026-11-19T09:15:00+08:00",
+      "reply_to": {
+        "record_id": "4254b6ca1e0e3b38fd6214b7c6b3252b8698054670b625e4b0986a28218358fb",
+        "revision": 1
+      }
+    },
+    {
+      "event_id": "zh34-e1",
+      "scope": "console:review34",
+      "content": "蓝砂样品准备交接，冷藏箱谁去领？",
+      "topic": "蓝砂交接",
+      "speaker": "阿禾",
+      "source_venue": "实验室排班群",
+      "occurred_at": "2026-11-19T23:50:00+08:00"
+    },
+    {
+      "event_id": "zh34-e2",
+      "scope": "console:review34",
+      "content": "我明天上午九点去南门取，带上保温袋。",
+      "topic": "蓝砂交接",
+      "speaker": "小严",
+      "source_venue": "实验室排班群",
+      "occurred_at": "2026-11-19T23:55:00+08:00",
+      "reply_to": {
+        "record_id": "a357a1245546e273f35b787eb8fc84f8e316234cb471bd69d7d004262107974d",
+        "revision": 1
+      }
+    },
+    {
+      "event_id": "zh34-e3",
+      "scope": "console:review34",
+      "content": "送到以后请把封条编号抄在纸单上。",
+      "topic": "蓝砂交接",
+      "speaker": "阿禾",
+      "source_venue": "实验室排班群",
+      "occurred_at": "2026-11-20T08:00:00+08:00",
+      "reply_to": {
+        "record_id": "794bf24262483e78b2520de469f7076be4d8b4a68a5666eda3d58500e14a962e",
+        "revision": 1
+      }
+    },
+    {
+      "event_id": "zh34-e4",
+      "scope": "console:review34",
+      "content": "纸单已经装进绿色文件夹。",
+      "topic": "蓝砂交接",
+      "speaker": "小严",
+      "source_venue": "实验室排班群",
+      "occurred_at": "2026-11-20T08:10:00+08:00",
+      "reply_to": {
+        "record_id": "df4cc44656d094694be2f63c2480d3853d04a6ecd054179ff27a690304c5977e",
+        "revision": 1
+      }
+    },
+    {
+      "event_id": "zh34-w1",
+      "scope": "console:review34",
+      "content": "云杉周末值班借用红色对讲机到周六十二点，随后交还。",
+      "topic": "云杉值班",
+      "speaker": "青竹",
+      "source_venue": "实验室排班群",
+      "occurred_at": "2026-11-19T09:00:00+08:00",
+      "assertion": {
+        "subject_id": "云杉值班",
+        "predicate": "commitment",
+        "value": "借用红色对讲机",
+        "effective_at": "2026-11-19T09:00:00+08:00",
+        "valid_until": "2026-11-21T12:00:00+08:00"
+      }
+    },
+    {
+      "event_id": "zh34-w2",
+      "scope": "console:review34",
+      "content": "备用电池在一楼抽屉。",
+      "topic": "云杉值班",
+      "speaker": "老何",
+      "source_venue": "实验室排班群",
+      "occurred_at": "2026-11-19T09:20:00+08:00",
+      "reply_to": {
+        "record_id": "1461a1c37c3c585262b7ab0d689aa88ac51bac791690f18cd01f21a44b6ebd3c",
+        "revision": 1
+      }
+    },
+    {
+      "event_id": "zh34-w3",
+      "scope": "console:review34",
+      "content": "蓝色备用机仍在值班室，周一轮班带走。",
+      "topic": "云杉值班",
+      "speaker": "青竹",
+      "source_venue": "实验室排班群",
+      "occurred_at": "2026-11-20T09:00:00+08:00",
+      "assertion": {
+        "subject_id": "云杉值班",
+        "predicate": "status",
+        "value": "蓝色备用机在值班室",
+        "effective_at": "2026-11-20T09:00:00+08:00",
+        "valid_until": "2026-11-23T18:00:00+08:00"
+      }
+    },
+    {
+      "event_id": "zh34-p1",
+      "scope": "console:review34",
+      "content": "银杏图册的校样寄来了吗？",
+      "topic": "银杏校样",
+      "speaker": "阮宁",
+      "source_venue": "实验室排班群",
+      "occurred_at": "2026-11-19T09:00:00+08:00"
+    },
+    {
+      "event_id": "zh34-p2",
+      "scope": "console:review34",
+      "content": "已经寄到，封底印反了。",
+      "topic": "银杏校样",
+      "speaker": "晓薇",
+      "source_venue": "实验室排班群",
+      "occurred_at": "2026-11-19T10:10:00+08:00",
+      "reply_to": {
+        "record_id": "eb36200620e0fcd086bdcec5002dd724b9d29133fbcba9695443e51c7b5f3c51",
+        "revision": 1
+      }
+    },
+    {
+      "event_id": "zh34-p3",
+      "scope": "console:review34",
+      "content": "我后天下午三点把替换页送到西楼。",
+      "topic": "银杏校样",
+      "speaker": "阮宁",
+      "source_venue": "实验室排班群",
+      "occurred_at": "2026-11-19T10:12:00+08:00",
+      "reply_to": {
+        "record_id": "bf28b51d2bbc9587c360ef586d41badc9f0326d84af656fefff1e90952ac3601",
+        "revision": 1
+      }
+    },
+    {
+      "event_id": "zh34-p4",
+      "scope": "console:review34",
+      "content": "西楼收发章由卢老师保管。",
+      "topic": "银杏校样",
+      "speaker": "晓薇",
+      "source_venue": "实验室排班群",
+      "occurred_at": "2026-11-19T10:14:00+08:00",
+      "reply_to": {
+        "record_id": "60fb3bad9156d2d495302c61d9e08d84787a38cf26a7aa2d3ac34aa5527f8910",
+        "revision": 1
+      }
+    },
+    {
+      "event_id": "zh34-d0",
+      "scope": "console:review34",
+      "content": "冬令市集的值班交接和评审都按原计划办理，备用资料放前台。",
+      "topic": "冬令市集",
+      "speaker": "小俞",
+      "source_venue": "实验室排班群",
+      "occurred_at": "2026-11-20T13:00:00+08:00",
+      "assertion": {
+        "subject_id": "冬令市集",
+        "predicate": "status",
+        "value": "按原计划",
+        "effective_at": "2026-11-20T09:00:00+08:00"
+      }
+    },
+    {
+      "event_id": "zh34-d1",
+      "scope": "console:review34",
+      "content": "玉兰搬迁的值班交接和评审都按原计划办理，备用资料放前台。",
+      "topic": "玉兰搬迁",
+      "speaker": "小俞",
+      "source_venue": "实验室排班群",
+      "occurred_at": "2026-11-20T13:00:00+08:00",
+      "assertion": {
+        "subject_id": "玉兰搬迁",
+        "predicate": "status",
+        "value": "按原计划",
+        "effective_at": "2026-11-20T09:00:00+08:00"
+      }
+    },
+    {
+      "event_id": "zh34-d2",
+      "scope": "console:review34",
+      "content": "黑板报的值班交接和评审都按原计划办理，备用资料放前台。",
+      "topic": "黑板报",
+      "speaker": "小俞",
+      "source_venue": "实验室排班群",
+      "occurred_at": "2026-11-20T13:00:00+08:00",
+      "assertion": {
+        "subject_id": "黑板报",
+        "predicate": "status",
+        "value": "按原计划",
+        "effective_at": "2026-11-20T09:00:00+08:00"
+      }
+    },
+    {
+      "event_id": "zh34-d3",
+      "scope": "console:review34",
+      "content": "音乐节的值班交接和评审都按原计划办理，备用资料放前台。",
+      "topic": "音乐节",
+      "speaker": "小俞",
+      "source_venue": "实验室排班群",
+      "occurred_at": "2026-11-20T13:00:00+08:00",
+      "assertion": {
+        "subject_id": "音乐节",
+        "predicate": "status",
+        "value": "按原计划",
+        "effective_at": "2026-11-20T09:00:00+08:00"
+      }
+    },
+    {
+      "event_id": "zh34-d4",
+      "scope": "console:review34",
+      "content": "航模赛的值班交接和评审都按原计划办理，备用资料放前台。",
+      "topic": "航模赛",
+      "speaker": "小俞",
+      "source_venue": "实验室排班群",
+      "occurred_at": "2026-11-20T13:00:00+08:00",
+      "assertion": {
+        "subject_id": "航模赛",
+        "predicate": "status",
+        "value": "按原计划",
+        "effective_at": "2026-11-20T09:00:00+08:00"
+      }
+    },
+    {
+      "event_id": "zh34-d5",
+      "scope": "console:review34",
+      "content": "香樟导览的值班交接和评审都按原计划办理，备用资料放前台。",
+      "topic": "香樟导览",
+      "speaker": "小俞",
+      "source_venue": "实验室排班群",
+      "occurred_at": "2026-11-20T13:00:00+08:00",
+      "assertion": {
+        "subject_id": "香樟导览",
+        "predicate": "status",
+        "value": "按原计划",
+        "effective_at": "2026-11-20T09:00:00+08:00"
+      }
+    },
+    {
+      "event_id": "zh34-d6",
+      "scope": "console:review34",
+      "content": "晨跑的值班交接和评审都按原计划办理，备用资料放前台。",
+      "topic": "晨跑",
+      "speaker": "小俞",
+      "source_venue": "实验室排班群",
+      "occurred_at": "2026-11-20T13:00:00+08:00",
+      "assertion": {
+        "subject_id": "晨跑",
+        "predicate": "status",
+        "value": "按原计划",
+        "effective_at": "2026-11-20T09:00:00+08:00"
+      }
+    },
+    {
+      "event_id": "zh34-d7",
+      "scope": "console:review34",
+      "content": "铜版归档的值班交接和评审都按原计划办理，备用资料放前台。",
+      "topic": "铜版归档",
+      "speaker": "小俞",
+      "source_venue": "实验室排班群",
+      "occurred_at": "2026-11-20T13:00:00+08:00",
+      "assertion": {
+        "subject_id": "铜版归档",
+        "predicate": "status",
+        "value": "按原计划",
+        "effective_at": "2026-11-20T09:00:00+08:00"
+      }
+    },
+    {
+      "event_id": "zh34-other",
+      "scope": "console:other",
+      "content": "青鹭评审改期原因是断电，钥匙在仓库。",
+      "topic": "青鹭评审",
+      "speaker": "隔壁王",
+      "source_venue": "另一项目组",
+      "occurred_at": "2026-11-19T09:00:00+08:00"
+    }
+  ],
+  "questions": [
+    {
+      "group": "字面与归属",
+      "query": "红杉厅在哪里碰头",
+      "gold": [
+        {
+          "record_id": "4254b6ca1e0e3b38fd6214b7c6b3252b8698054670b625e4b0986a28218358fb",
+          "revision": 1
+        }
+      ],
+      "at": "2026-11-21T11:00:00+08:00"
+    },
+    {
+      "group": "字面与归属",
+      "query": "封底印反",
+      "gold": [
+        {
+          "record_id": "bf28b51d2bbc9587c360ef586d41badc9f0326d84af656fefff1e90952ac3601",
+          "revision": 1
+        }
+      ],
+      "at": "2026-11-21T11:00:00+08:00"
+    },
+    {
+      "group": "字面与归属",
+      "query": "绿色文件夹纸单",
+      "gold": [
+        {
+          "record_id": "b5cf6a2dcd44c3d533ce341c46efcf7b11fdbd41c4b94a32e56716af681afb5a",
+          "revision": 1
+        }
+      ],
+      "at": "2026-11-21T11:00:00+08:00"
+    },
+    {
+      "group": "字面与归属",
+      "query": "备用电池抽屉",
+      "gold": [
+        {
+          "record_id": "0f3a140bc4a3131b3f237f11b6bef7f1f8164354639b45007c94e4aca112eaa1",
+          "revision": 1
+        }
+      ],
+      "at": "2026-11-21T11:00:00+08:00"
+    },
+    {
+      "group": "事件与指代",
+      "query": "青鹭评审改期的起因",
+      "gold": [
+        {
+          "record_id": "7fa7df37095115713437b6538e538d4ded4ec8a2b538c8b213a2c891af4e81d6",
+          "revision": 1
+        }
+      ],
+      "at": "2026-11-21T11:00:00+08:00"
+    },
+    {
+      "group": "事件与指代",
+      "query": "青鹭评审场地钥匙找谁领",
+      "gold": [
+        {
+          "record_id": "b9e1d32c1372575dc825d6e0697b13b56841749a91f3b3b1bc2a61809aec26b1",
+          "revision": 1
+        }
+      ],
+      "at": "2026-11-21T11:00:00+08:00"
+    },
+    {
+      "group": "事件与指代",
+      "query": "银杏校样的问题出在哪里",
+      "gold": [
+        {
+          "record_id": "bf28b51d2bbc9587c360ef586d41badc9f0326d84af656fefff1e90952ac3601",
+          "revision": 1
+        }
+      ],
+      "at": "2026-11-21T11:00:00+08:00"
+    },
+    {
+      "group": "事件与指代",
+      "query": "蓝砂交接的封条怎么处理",
+      "gold": [
+        {
+          "record_id": "df4cc44656d094694be2f63c2480d3853d04a6ecd054179ff27a690304c5977e",
+          "revision": 1
+        }
+      ],
+      "at": "2026-11-21T11:00:00+08:00"
+    },
+    {
+      "group": "事件与指代",
+      "query": "银杏校样由谁收发盖章",
+      "gold": [
+        {
+          "record_id": "16b1d1240ea6d5294d1449aba7484f6595a53e51b5969f811da8daec900ffacf",
+          "revision": 1
+        }
+      ],
+      "at": "2026-11-21T11:00:00+08:00"
+    },
+    {
+      "group": "相对日期",
+      "query": "2026-11-20 上午九点南门取件",
+      "gold": [
+        {
+          "record_id": "794bf24262483e78b2520de469f7076be4d8b4a68a5666eda3d58500e14a962e",
+          "revision": 1
+        }
+      ],
+      "at": "2026-11-21T11:00:00+08:00"
+    },
+    {
+      "group": "相对日期",
+      "query": "2026-11-21 下午三点西楼送页",
+      "gold": [
+        {
+          "record_id": "60fb3bad9156d2d495302c61d9e08d84787a38cf26a7aa2d3ac34aa5527f8910",
+          "revision": 1
+        }
+      ],
+      "at": "2026-11-21T11:00:00+08:00"
+    },
+    {
+      "group": "相对日期",
+      "query": "2026-11-20 蓝砂保温袋",
+      "gold": [
+        {
+          "record_id": "794bf24262483e78b2520de469f7076be4d8b4a68a5666eda3d58500e14a962e",
+          "revision": 1
+        }
+      ],
+      "at": "2026-11-21T11:00:00+08:00"
+    },
+    {
+      "group": "双时态",
+      "query": "青鹭评审当时怎么排",
+      "gold": [
+        {
+          "record_id": "acc6c430b6d30e97c14c3e849018fe93e872fcdf81dffa68ac64d35c14c0b480",
+          "revision": 1
+        }
+      ],
+      "at": "2026-11-21T11:00:00+08:00",
+      "subject_id": "青鹭评审",
+      "predicate": "scheduled_for",
+      "known_event": "m2"
+    },
+    {
+      "group": "双时态",
+      "query": "青鹭评审的新安排",
+      "gold": [
+        {
+          "record_id": "4254b6ca1e0e3b38fd6214b7c6b3252b8698054670b625e4b0986a28218358fb",
+          "revision": 1
+        }
+      ],
+      "at": "2026-11-21T11:00:00+08:00",
+      "subject_id": "青鹭评审",
+      "predicate": "scheduled_for"
+    },
+    {
+      "group": "双时态",
+      "query": "青鹭评审生效前的安排",
+      "gold": [
+        {
+          "record_id": "acc6c430b6d30e97c14c3e849018fe93e872fcdf81dffa68ac64d35c14c0b480",
+          "revision": 1
+        }
+      ],
+      "at": "2026-11-18T20:00:00+08:00",
+      "subject_id": "青鹭评审",
+      "predicate": "scheduled_for"
+    },
+    {
+      "group": "限期状态",
+      "query": "云杉值班的对讲机还能借吗",
+      "gold": [
+        {
+          "record_id": "1461a1c37c3c585262b7ab0d689aa88ac51bac791690f18cd01f21a44b6ebd3c",
+          "revision": 1
+        }
+      ],
+      "at": "2026-11-21T11:00:00+08:00",
+      "subject_id": "云杉值班",
+      "predicate": "commitment"
+    },
+    {
+      "group": "限期状态",
+      "query": "云杉值班的对讲机还能借吗",
+      "gold": [],
+      "at": "2026-11-21T12:00:00+08:00",
+      "subject_id": "云杉值班",
+      "predicate": "commitment",
+      "expired": [
+        {
+          "record_id": "1461a1c37c3c585262b7ab0d689aa88ac51bac791690f18cd01f21a44b6ebd3c",
+          "revision": 1
+        }
+      ]
+    },
+    {
+      "group": "限期状态",
+      "query": "云杉值班室有哪些备用机",
+      "gold": [
+        {
+          "record_id": "4fc83e5246f365136f2dddda36c6c56720d6fd69a8eba01ab69689914201cdba",
+          "revision": 1
+        }
+      ],
+      "at": "2026-11-21T11:00:00+08:00",
+      "subject_id": "云杉值班",
+      "predicate": "status"
+    },
+    {
+      "group": "限期状态",
+      "query": "云杉值班室的蓝色备用机还在吗",
+      "gold": [],
+      "at": "2026-11-24T08:00:00+08:00",
+      "subject_id": "云杉值班",
+      "predicate": "status",
+      "expired": [
+        {
+          "record_id": "4fc83e5246f365136f2dddda36c6c56720d6fd69a8eba01ab69689914201cdba",
+          "revision": 1
+        }
+      ]
+    },
+    {
+      "group": "受众",
+      "query": "青鹭评审另一项目组的断电记录",
+      "gold": [
+        {
+          "record_id": "7b561d8e44c3d22f03014a858dc6b46b5c4a43533de97f913ec1de2fd8a07c6d",
+          "revision": 1
+        }
+      ],
+      "at": "2026-11-21T11:00:00+08:00",
+      "scope": "console:other"
+    }
+  ]
+}
