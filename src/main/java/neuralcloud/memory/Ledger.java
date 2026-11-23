@@ -163,7 +163,7 @@ final class Ledger {
                     Set.of("tool_attempt", "tool_result", "delivery_receipt").contains(kind);
             if (action) text(cmd, "action_id", 256);
             else if (cmd.has("action_id")) throw invalid("action_id");
-            if (cmd.has("channel")) channel(ctx, object(cmd, "channel"));
+            if (cmd.has("channel")) channel(ctx, object(cmd, "channel"), kind);
             if (cmd.has("identity")) {
                 if (!ctx.role().equals("ORCHESTRATOR") || !kind.equals("observation"))
                     throw denied();
@@ -210,7 +210,7 @@ final class Ledger {
                                     || parse(get(row, "body")).has("source_refs")))
                         throw conflict("SOURCE_CHANGED");
                     if ("sensitive".equals(get(parse(get(row, "body")), "privacy"))) {
-                        if (ctx.peer() != null) throw denied();
+                        if (ctx.externalAudience()) throw denied();
                         body.addProperty("privacy", "sensitive");
                     }
                 } else if (store.rows(
@@ -247,7 +247,7 @@ final class Ledger {
             if (visible == null) throw conflict("SOURCE_CHANGED");
             var oldBody = parse(get(prior, "body"));
             if ("sensitive".equals(get(oldBody, "privacy"))) {
-                if (ctx.peer() != null) throw denied();
+                if (ctx.externalAudience()) throw denied();
                 body.addProperty("privacy", "sensitive");
             }
             // 若旧印象仍在线且新印象未指定新标题，自动沿用旧 topic 保持事项卡归类连贯。
@@ -260,10 +260,18 @@ final class Ledger {
         return id;
     }
 
-    /** 校验 QQ 渠道元数据与调用上下文的一致性，防止伪造私聊/群聊来源标识或冒用发件人。 */
-    private void channel(Access ctx, JsonObject channel) {
+    /** 校验渠道元数据与会话的一致性。只有移动群的明确通知可以取得成员引用权。 */
+    private void channel(Access ctx, JsonObject channel, String kind) {
         keys(channel, "platform account_id sender_id message_id conversation_id type");
-        one(channel, "platform", "qq");
+        if (one(channel, "platform", "qq", "mistyai").equals("mistyai")) {
+            one(channel, "type", "mobile_group_notice");
+            String group = "group:mistyai:" + Access.mobileInstance(channel, "account_id");
+            Access.mobileId(channel, "sender_id");
+            Access.mobileId(channel, "message_id");
+            if (!kind.equals("observation") || !group.equals(ctx.scope())
+                    || !group.equals(text(channel, "conversation_id", 256))) throw denied();
+            return;
+        }
         String type = one(channel, "type", "qq_private", "qq_group");
         String account = Access.qqId(channel, "account_id"),
                 sender = Access.qqId(channel, "sender_id");
@@ -337,7 +345,7 @@ final class Ledger {
                 cmd,
                 COMMAND
                         + "record_id expected_revision operation reason content assertion topic"
-                        + " reply_to");
+                        + " reply_to channel");
         String id = id(cmd, "record_id"), op = one(cmd, "operation", "REPLACE", "RETRACT");
         text(cmd, "reason", 1024);
         long expected = number(cmd, "expected_revision", 1, Long.MAX_VALUE);
@@ -349,6 +357,18 @@ final class Ledger {
         if (!get(old, "status").equals("ONLINE")) throw conflict("SOURCE_CHANGED");
         var previousBody = parse(get(old, "body"));
         var body = previousBody.deepCopy();
+        // 群通知的每次替换或撤回来自同一作者的新群消息；保留各版实际消息 ID 供审计。
+        var priorChannel = previousBody.getAsJsonObject("channel");
+        boolean notice = priorChannel != null && "mistyai".equals(get(priorChannel, "platform"));
+        if (notice != cmd.has("channel")) throw invalid("channel");
+        if (notice) {
+            var next = object(cmd, "channel");
+            channel(ctx, next, get(old, "kind"));
+            if (!"mistyai".equals(get(next, "platform"))
+                    || !get(priorChannel, "sender_id").equals(get(next, "sender_id"))) throw denied();
+            if (get(priorChannel, "message_id").equals(get(next, "message_id"))) throw invalid("message_id");
+            body.add("channel", next);
+        }
         body.remove("assertion");
         body.remove("identity");
         if (op.equals("REPLACE")) {

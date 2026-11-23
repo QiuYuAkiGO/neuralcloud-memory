@@ -16,9 +16,11 @@ import com.google.gson.*;
  * @param role    调用方角色（ROUTER / MASTER / CHAT_WORKER / TASK_WORKER / ORCHESTRATOR）
  * @param account 可信 QQ 渠道绑定的机器人账号，非 QQ 私聊上下文时为 null
  * @param peer    可信 QQ 私聊入站的对端用户账号，非 QQ 私聊上下文时为 null
+ * @param mobileGroup 已认证移动成员所属的群会话，仅该成员的私聊上下文持有
  */
 record Access(
-        String scope, String session, String actor, String role, String account, String peer) {
+        String scope, String session, String actor, String role, String account, String peer,
+        String mobileGroup) {
     /**
      * 在请求边界解析并校验 context 对象。
      * 业务约束：角色 ID 必须与当前 Memory 实例绑定的一致；凡以 c2c:onebot: 开头的私聊会话
@@ -26,7 +28,7 @@ record Access(
      */
     static Access from(Store store, JsonObject request) {
         var ctx = object(request, "context");
-        keys(ctx, "character_id conversation_id session_id actor_id role qq");
+        keys(ctx, "character_id conversation_id session_id actor_id role qq mobile_member");
         if (!text(ctx, "character_id", 128).equals(store.character)) throw denied();
         String scope = text(ctx, "conversation_id", 256), session = text(ctx, "session_id", 256);
         String actor = text(ctx, "actor_id", 128);
@@ -43,7 +45,35 @@ record Access(
         }
         // 私聊会话禁止省略 qq 身份段，否则无法区分本人发言和受众隐私边界。
         if (scope.startsWith("c2c:onebot:") && peer == null) throw denied();
-        return new Access(scope, session, actor, role, account, peer);
+        // 移动渠道在校验群成员凭据后签入身份。单个 MistyAI 服务实例拥有一个共享群。
+        String mobileGroup = null;
+        if (ctx.has("mobile_member")) {
+            var member = object(ctx, "mobile_member");
+            keys(member, "instance member_id");
+            String instance = mobileInstance(member, "instance"), id = mobileId(member, "member_id");
+            if (!scope.equals("c2c:mistyai:" + instance + ":" + id)) throw denied();
+            mobileGroup = "group:mistyai:" + instance;
+        }
+        if (scope.startsWith("c2c:mistyai:") && mobileGroup == null) throw denied();
+        return new Access(scope, session, actor, role, account, peer, mobileGroup);
+    }
+
+    /** 实例名与成员、消息的正整数 ID 均由移动服务分配，字符集保证会话各段无歧义。 */
+    static String mobileInstance(JsonObject object, String key) {
+        String value = text(object, key, 64);
+        if (!value.matches("[a-z0-9][a-z0-9-]{0,63}")) throw invalid(key);
+        return value;
+    }
+
+    static String mobileId(JsonObject object, String key) {
+        String value = text(object, key, 19);
+        if (!value.matches("[1-9][0-9]{0,18}")) throw invalid(key);
+        return value;
+    }
+
+    /** 已认证的外部私聊受众共用敏感正文限制。 */
+    boolean externalAudience() {
+        return peer != null || mobileGroup != null;
     }
 
     /** 校验 QQ 号格式：5~16 位十进制数字且不以 0 开头。 */

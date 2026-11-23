@@ -1194,6 +1194,25 @@
               "account_id",
               "peer_id"
             ]
+          },
+          "mobile_member": {
+            "description": "可信渠道每次验证成员身份后签入。私聊会话必须是 c2c:mistyai:<instance>:<member_id>；每实例对应一个共享群。",
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "instance": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+              },
+              "member_id": {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{0,18}$"
+              }
+            },
+            "required": [
+              "instance",
+              "member_id"
+            ]
           }
         },
         "required": [
@@ -1202,6 +1221,19 @@
           "conversation_id",
           "actor_id",
           "role"
+        ],
+        "allOf": [
+          {
+            "if": {"properties": {"conversation_id": {"pattern": "^c2c:mistyai:"}}},
+            "then": {"required": ["mobile_member"]}
+          },
+          {
+            "if": {"required": ["mobile_member"]},
+            "then": {
+              "properties": {"conversation_id": {"pattern": "^c2c:mistyai:[a-z0-9][a-z0-9-]{0,63}:[1-9][0-9]{0,18}$"}},
+              "not": {"required": ["qq"]}
+            }
+          }
         ]
       },
       "RecordRef": {
@@ -1263,48 +1295,55 @@
         ]
       },
       "Channel": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "platform": {
-            "type": "string",
-            "enum": [
-              "qq"
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "platform": {
+                "type": "string",
+                "enum": [
+                  "qq"
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "qq_private",
+                  "qq_group"
+                ]
+              },
+              "account_id": {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{4,15}$"
+              },
+              "sender_id": {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{4,15}$"
+              },
+              "message_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "conversation_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              }
+            },
+            "required": [
+              "platform",
+              "type",
+              "account_id",
+              "sender_id",
+              "message_id",
+              "conversation_id"
             ]
           },
-          "type": {
-            "type": "string",
-            "enum": [
-              "qq_private",
-              "qq_group"
-            ]
-          },
-          "account_id": {
-            "type": "string",
-            "pattern": "^[1-9][0-9]{4,15}$"
-          },
-          "sender_id": {
-            "type": "string",
-            "pattern": "^[1-9][0-9]{4,15}$"
-          },
-          "message_id": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 128
-          },
-          "conversation_id": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 256
+          {
+            "$ref": "#/components/schemas/MobileNoticeChannel"
           }
-        },
-        "required": [
-          "platform",
-          "type",
-          "account_id",
-          "sender_id",
-          "message_id",
-          "conversation_id"
         ]
       },
       "Ingest": {
@@ -1627,6 +1666,9 @@
                 "type": "null"
               }
             ]
+          },
+          "channel": {
+            "$ref": "#/components/schemas/MobileNoticeChannel"
           }
         },
         "required": [
@@ -2600,6 +2642,43 @@
           "read_seq",
           "organized_seq",
           "processed"
+        ]
+      },
+      "MobileNoticeChannel": {
+        "type": "object",
+        "description": "群服务已确认的显式通知。更正和撤回须绑定同一群与作者的新消息。",
+        "additionalProperties": false,
+        "properties": {
+          "platform": {
+            "const": "mistyai"
+          },
+          "type": {
+            "const": "mobile_group_notice"
+          },
+          "account_id": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+          },
+          "sender_id": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]{0,18}$"
+          },
+          "message_id": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]{0,18}$"
+          },
+          "conversation_id": {
+            "type": "string",
+            "pattern": "^group:mistyai:[a-z0-9][a-z0-9-]{0,63}$"
+          }
+        },
+        "required": [
+          "platform",
+          "type",
+          "account_id",
+          "sender_id",
+          "message_id",
+          "conversation_id"
         ]
       }
     }

@@ -73,6 +73,12 @@ python -u tests/stage2.py --harness ../neuralcloud-harness
 python -u tests/stage2.py --harness ../neuralcloud-harness --gemini
 ```
 
+## MistyAI 共享群通知
+
+可信移动渠道每次核验受众的群成员凭据，再在私聊请求的 `context.mobile_member` 签入实例与成员 ID。一个移动服务实例对应一个共享群。群消息写入时须由渠道标明 `mobile_group_notice`。同群成员的 `READ` 和 `CITE` 可以读取非敏感通知的在线现版。通知更正或撤回需要同群同作者的新消息 ID 和预期版本；依赖旧版的回复随之失效。
+
+运行 `python tests/mobile_notices.py --harness ../neuralcloud-harness` 可验证跨群隔离、版本更正及派生回复的失效。
+
 ## 接口与证据
 
 八个首版接口使用同一 Bearer 凭据。写入以 `(source_instance, event_id)` 幂等。事项的显式替代关系、生效时间和修订历史用于区分原安排与现安排。更正或撤回在同一事务中使派生内容失效。`stream_id` 与 `read_seq` 随每次读取交付给 Harness，供下轮刷新和动作前复核使用。[v2 OpenAPI](contracts/v2/openapi.json) · [会议请求与响应](contracts/v2/examples/meeting.json) · [v1 对照样本](contracts/v2/examples/v1-replay.json)

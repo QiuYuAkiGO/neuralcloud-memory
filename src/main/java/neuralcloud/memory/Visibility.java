@@ -38,11 +38,8 @@ final class Visibility {
     // 在排名、原文窗口和派生发布处使用同一个受众条件。派生正文须可引用所有依赖。
     static String allowed(Access ctx, String use, List<Object> args) {
         args.add(ctx.scope());
-        // QQ 私聊外部受众不得读取 sensitive 隐私级别记录；非 QQ（控制台/内部）上下文按策略保留。
-        String privacy =
-                ctx.peer() == null
-                        ? ""
-                        : " AND json_extract(v.body,'$.privacy') IN ('public','private')";
+        String privacy = ctx.externalAudience()
+                ? " AND json_extract(v.body,'$.privacy') IN ('public','private')" : "";
         if (use.equals("LOCAL")) {
             args.add(ctx.scope());
             return "r.conversation=? "
@@ -52,21 +49,40 @@ final class Visibility {
         }
         args.add(ctx.scope());
         args.add(use);
+        String direct = "", dependency = "";
+        if (ctx.mobileGroup() != null) {
+            args.add(ctx.mobileGroup());
+            direct = " OR (r.id,v.revision) IN (" + MEMBER_NOTICES + ")";
+        }
         args.add(ctx.scope());
+        if (ctx.mobileGroup() != null) {
+            args.add(ctx.mobileGroup());
+            dependency = " AND (d.source,d.revision) NOT IN (" + MEMBER_NOTICES + ")";
+        }
         // 注意：跨会话授权只匹配当前最新修订（v.revision=r.revision），且状态为 ACTIVE。
         // 非 ONLINE 项（如 RETRACTED/SOURCE_CHANGED）跳过依赖检查，以便读接口可向原有受众返回失效状态而非正文。
         return """
             ((r.conversation=? %s) OR (v.revision=r.revision AND EXISTS (
                SELECT 1 FROM visibility_grants g WHERE g.record_id=r.id AND g.revision=v.revision
-               AND g.target=? AND g.status='ACTIVE' AND (g.use='CITE' OR g.use=?))))
+               AND g.target=? AND g.status='ACTIVE' AND (g.use='CITE' OR g.use=?))) %s)
             AND (r.status<>'ONLINE' OR NOT EXISTS (
                SELECT 1 FROM evidence_dependencies d WHERE d.derived=r.id AND NOT EXISTS (
                   SELECT 1 FROM audience_rights a JOIN records p ON p.id=a.id
                   WHERE a.id=d.source AND a.revision=d.revision AND a.audience=? AND a.use='CITE'
-                  AND p.status='ONLINE')))
+                  AND p.status='ONLINE') %s))
             """
-                .formatted(privacy);
+                .formatted(privacy, direct, dependency);
     }
+
+    /** 同群成员仅能引用群通知的在线现版。派生回复的每条证据也使用同一集合复核。 */
+    private static final String MEMBER_NOTICES = """
+            SELECT n.id,n.revision FROM records n JOIN revisions nv
+            ON nv.record_id=n.id AND nv.revision=n.revision
+            WHERE n.conversation=? AND n.kind='observation' AND n.status='ONLINE'
+            AND json_extract(nv.body,'$.channel.platform')='mistyai'
+            AND json_extract(nv.body,'$.channel.type')='mobile_group_notice'
+            AND json_extract(nv.body,'$.privacy') IN ('public','private')
+            """;
 
     /** 授权或撤销决策结果，供 Ledger 写入变更流与持久回执。 */
     record Decision(String record, long revision, String grant) {}
