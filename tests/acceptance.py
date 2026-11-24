@@ -251,7 +251,7 @@ class Relay(BaseHTTPRequestHandler):
 
 class ServicePair:
     """拉起真实的 Memory 与 Harness 两个正式 JVM 入口，管理隔离证据目录、OpenAPI 契约校验与审计查询。"""
-    def __init__(self, harness, *, ports=None, ledger=None, audit_dir=None):
+    def __init__(self, harness, *, ports=None, ledger=None, audit_dir=None, session_isolation=None):
         self.out = ROOT / "target" / "acceptance" / datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
         try:
             self.out.mkdir(parents=True)
@@ -286,8 +286,12 @@ class ServicePair:
         self.contract_calls = set()
         self.mproc = self.hproc = None
         self.pids, self.results = [], []
-        props(self.out / "memory.properties", dict(port=self.port, dataDirectory=self.ledger.as_posix(), characterId="misty-dev",
-                                                  sourceInstance="neuralcloud-java", accessTokenEnv="NC_ACCEPTANCE_TOKEN"))
+        memory_config = dict(port=self.port, dataDirectory=self.ledger.as_posix(), characterId="misty-dev",
+                             sourceInstance="neuralcloud-java", accessTokenEnv="NC_ACCEPTANCE_TOKEN")
+        # 省略键才能验证服务的真实默认值，也能启动尚无该开关的历史版本。
+        if session_isolation is not None:
+            memory_config["sessionIsolation"] = session_isolation
+        props(self.out / "memory.properties", memory_config)
         self.client_config = dict(endpoint=self.base[:-3], characterId="misty-dev", accessTokenEnv="NC_ACCEPTANCE_TOKEN",
                                   recallMode="scoped", apiVersion=2)
         self.client = self.out / "client.properties"
@@ -365,8 +369,9 @@ class ServicePair:
 
 class Run(ServicePair):
     """带全套本地挡板（可控模型、CONNECT 代理、OneBot 渠道、故障中继 Relay）的完整验收运行环境。"""
-    def __init__(self, harness):
-        super().__init__(harness)
+    def __init__(self, harness, *, session_isolation="true"):
+        # 这些阶段回放包含会话隔离和原作者逐条授权的固定断言。
+        super().__init__(harness, session_isolation=session_isolation)
         self.proxy, self.http, self.trust = model_boundaries(self.out)
         self.harness_vm_args = ["-Djavax.net.ssl.trustStore="+str(self.trust), "-Djavax.net.ssl.trustStorePassword=fixture-only"]
         self.env["NC_FIXTURE_KEY"] = "fixture-only"

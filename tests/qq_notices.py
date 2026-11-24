@@ -35,7 +35,8 @@ def verify(run):
 
 
 if __name__ == "__main__":
-    run = ServicePair(ROOT.parent / "neuralcloud-harness")
+    # 在隔离模式单独验证普通群消息和已授权群通知的区别。
+    run = ServicePair(ROOT.parent / "neuralcloud-harness", session_isolation="true")
     try:
         verify(run)
     finally:
