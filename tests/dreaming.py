@@ -92,6 +92,26 @@ class Dreaming(unittest.TestCase):
         self.assertCountEqual([fields(p) for p in actual], [fields({**p, "author": "DREAMING",
                               "version": p["expected_version"] + 1}) for p in expected])
 
+    def test_publish_first_person_text(self):
+        """Misty 以“我”陈述自己对人物的认识，原句随来源和署名一起发布。"""
+        source = self.ingest("page-turner", "林枝说她会在第二乐章翻谱。")
+        person = change("person", "林枝", "我记得林枝说，她会在第二乐章帮忙翻谱。", [source])
+        saved = self.post("commit", publication(self.batch(STUDIO), "in-my-words", [person]))
+        self.assertEqual(saved["status"], "DURABLE")
+        self.assertProfiles(person)
+
+    def test_reject_noninitial_first_person(self):
+        """第二项正文首字不符时整批拒绝，不能因句中有“我”或去掉前导空格而通过。"""
+        source = self.ingest("page-turner", "林枝说她会在第二乐章翻谱。")
+        page = self.batch(STUDIO)
+        person = change("person", "林枝", "我记得林枝答应帮忙翻谱。", [source])
+        for key, text in (("third-person", "林枝告诉我，她会在第二乐章翻谱。"),
+                          ("leading-space", " 我听到林枝答应在第二乐章翻谱。")):
+            topic = change("topic", "第二乐章", text, [source])
+            self.post("commit", publication(page, key, [person, topic]), 422)
+            self.assertEqual(self.receipt(key)["status"], "NOT_FOUND")
+        self.assertProfiles()
+
     def test_firsthand_input_and_master_authorship(self):
         """正例跨会话收三类原文；反例排除派生、尝试、送达回执及相似会话名。"""
         obs = self.ingest("obs", "小程说愿意排练。")
@@ -111,7 +131,7 @@ class Dreaming(unittest.TestCase):
                               [(STUDIO, "observation", "小程说愿意排练。"), (GROUP, "self_expression", "我能参加周六的合奏。"),
                                (GROUP, "tool_result", "场地预订已生效。")])
         self.assertEqual(page["profiles"], [])
-        person = change("person", "小程", "小程愿意排练。", [obs])
+        person = change("person", "小程", "我记得小程说愿意排练。", [obs])
         self.post("commit", publication(page, "publish", [person]))
         self.assertProfiles(person)
         # Master 的既有印象保留自己的引用和修订入口；同名 Dreaming 人物仍独立存在。
@@ -133,7 +153,7 @@ class Dreaming(unittest.TestCase):
         self.assertEqual(next_page["after"], page["through"])
         self.assertEvidence(next_page, second)
         self.post("commit", publication(page, "already-consumed", []), 409)
-        topic = change("topic", "演出", "已有第二条演出记录。", [second])
+        topic = change("topic", "演出", "我读到了第二条演出记录。", [second])
         command = publication(next_page, "publish-page", [topic])
         saved = self.post("commit", command)
         self.assertEqual((saved["status"], saved["through"]), ("DURABLE", next_page["through"]))
@@ -161,9 +181,9 @@ class Dreaming(unittest.TestCase):
         b = self.ingest("return", "小程已归还钥匙。")
         page = self.batch(STUDIO, limit=1)
         self.assertEvidence(page, a)
-        person = change("person", "小程", "小程已到场。", [a])
-        topic = change("topic", "钥匙", "钥匙已领取。", [a])
-        outside = change("topic", "钥匙", "钥匙已归还。", [b])
+        person = change("person", "小程", "我记得小程已经到场。", [a])
+        topic = change("topic", "钥匙", "我看到钥匙已被领取。", [a])
+        outside = change("topic", "钥匙", "我看到钥匙已经归还。", [b])
         self.post("commit", publication(page, "outside-batch", [person, outside]), 409)
         self.assertEqual(self.receipt("outside-batch")["status"], "NOT_FOUND")
         self.assertProfiles()
@@ -171,8 +191,8 @@ class Dreaming(unittest.TestCase):
         self.post("commit", publication(page, "create", [person, topic]))
 
         update = self.batch(STUDIO)
-        next_person = change("person", "小程", "小程归还过钥匙。", [b], version=1)
-        next_topic = change("topic", "钥匙", "钥匙已归还。", [b], version=1)
+        next_person = change("person", "小程", "我记得小程归还过钥匙。", [b], version=1)
+        next_topic = change("topic", "钥匙", "我看到钥匙已经归还。", [b], version=1)
         stale = {**next_topic, "expected_version": 0}
         self.post("commit", publication(update, "stale-version", [next_person, stale]), 409)
         self.assertEqual(self.receipt("stale-version")["status"], "NOT_FOUND")
@@ -185,14 +205,14 @@ class Dreaming(unittest.TestCase):
         """正例按保留版本重评幸存原文；反例更正或撤回立即隐藏旧认识，迟到提交无回执。"""
         notice = self.ingest("notice", "周五排练。")
         backup = self.ingest("backup", "小程准备了替补曲目。")
-        profile = change("topic", "彩排", "周五排练，有替补曲目。", [notice, backup])
+        profile = change("topic", "彩排", "我记得周五排练，还有替补曲目。", [notice, backup])
         self.post("commit", publication(self.batch(STUDIO), "before", [profile]))
         saturday = self.correct("edit", notice, "REPLACE", content="周六排练。")
         self.assertProfiles()
         page = self.batch(STUDIO)
         self.assertEvidence(page, saturday, backup)
         self.assertEqual(page["profiles"], [{"kind": "topic", "subject": "彩排", "version": 1}])
-        changed = change("topic", "彩排", "周六排练，有替补曲目。", [saturday, backup], version=1)
+        changed = change("topic", "彩排", "我记得周六排练，还有替补曲目。", [saturday, backup], version=1)
 
         # 领取后原作者再次编辑，旧批次内曾经合法的修订也必须在持久写入前复核。
         sunday = self.correct("edit-again", saturday, "REPLACE", content="周日排练。")
@@ -201,7 +221,7 @@ class Dreaming(unittest.TestCase):
         retry = self.batch(STUDIO)
         self.assertEqual(retry["after"], page["after"])
         self.assertEvidence(retry, sunday, backup)
-        current = change("topic", "彩排", "周日排练，有替补曲目。", [sunday, backup], version=1)
+        current = change("topic", "彩排", "我记得周日排练，还有替补曲目。", [sunday, backup], version=1)
         self.post("commit", publication(retry, "corrected", [current]))
         self.assertProfiles(current)
         self.correct("withdraw", sunday, "RETRACT")
@@ -209,7 +229,7 @@ class Dreaming(unittest.TestCase):
         reduced = self.batch(STUDIO)
         self.assertEvidence(reduced, backup)
         self.assertEqual(reduced["profiles"], [{"kind": "topic", "subject": "彩排", "version": 2}])
-        surviving = change("topic", "彩排", "只确认已准备替补曲目。", [backup], version=2)
+        surviving = change("topic", "彩排", "我只能确认已准备替补曲目。", [backup], version=2)
         self.post("commit", publication(reduced, "surviving", [surviving]))
         self.assertProfiles(surviving)
 
@@ -217,7 +237,7 @@ class Dreaming(unittest.TestCase):
         """全部撤回时旧档案隐去；新获准的同主题原文可按原版本建立下一版。"""
         subject = "月台组曲"
         old = self.ingest("old-room", "月台组曲在青麦厅使用单孔谱架。", topic=subject)
-        original = change("topic", subject, "月台组曲安排在青麦厅。", [old])
+        original = change("topic", subject, "我记得月台组曲安排在青麦厅。", [old])
         self.post("commit", publication(self.batch(STUDIO), "initial-room", [original]))
         self.correct("cancel-old-room", old, "RETRACT")
 
@@ -240,7 +260,7 @@ class Dreaming(unittest.TestCase):
         self.assertEqual(ready["profiles"], [{"kind": "topic", "subject": subject, "version": 1}])
         for withdrawn_text in ("青麦厅", "单孔谱架"):
             self.assertNotIn(withdrawn_text, str(ready))
-        rebuilt = change("topic", subject, "月台组曲的新彩排地点是枫影厅。", [new], version=1)
+        rebuilt = change("topic", subject, "我看到月台组曲的新彩排地点是枫影厅。", [new], version=1)
         self.post("commit", publication(ready, "mistaken-create", [{**rebuilt, "expected_version": 0}]), 409)
         self.assertProfiles()
         self.post("commit", publication(ready, "reopened", [rebuilt]))
@@ -261,7 +281,7 @@ class Dreaming(unittest.TestCase):
         local = self.ingest("conductor", "指挥确认参加。", GROUP)
         page = self.batch(GROUP)
         self.assertEvidence(page, local, outside)
-        profile = change("topic", "联演", "指挥确认参加礼堂彩排。", [local, outside])
+        profile = change("topic", "联演", "我记得指挥确认参加礼堂彩排。", [local, outside])
         self.post("commit", publication(page, "joint", [profile]))
         self.assertProfiles(profile)
         audience_context = context(GROUP, "MASTER")
@@ -286,7 +306,7 @@ class Dreaming(unittest.TestCase):
         expanded = self.batch(STUDIO, ARCHIVE)
         self.assertNotEqual(expanded["policy_version"], single["policy_version"])
         self.assertEvidence(expanded, studio, archived)
-        profile = change("topic", "借谱", "排练室借用档案室的旧谱。", [studio, archived])
+        profile = change("topic", "借谱", "我记得排练室借用档案室的旧谱。", [studio, archived])
         self.post("commit", publication(expanded, "two-scopes", [profile]))
         self.assertProfiles(profile)
 
