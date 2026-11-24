@@ -23,9 +23,11 @@ final class Ledger {
     /** 所有写命令共用的顶层必选字段前缀。 */
     private static final String COMMAND = "context source_instance event_id ";
     private final Store store;
+    private final Reader reader;
 
-    Ledger(Store store) {
+    Ledger(Store store, Reader reader) {
         this.store = store;
+        this.reader = reader;
     }
 
     /**
@@ -193,7 +195,7 @@ final class Ledger {
                 String rid = id(ref, "record_id");
                 long expected = number(ref, "revision", 1, Long.MAX_VALUE);
                 if (candidate) {
-                    var row = new Reader(store).currentFor(ctx, "CITE", rid);
+                    var row = reader.currentFor(ctx, "CITE", rid);
                     if (row == null
                             || !get(row, "status").equals("ONLINE")
                             || num(row, "revision") != expected) throw conflict("SOURCE_CHANGED");
@@ -206,7 +208,7 @@ final class Ledger {
                                                     "tool_result",
                                                     "delivery_receipt")
                                             .contains(get(row, "kind"))
-                                    || !new Reader(store).currentClaim(ctx, row, utc(Instant.now()))
+                                    || !reader.currentClaim(ctx, row, utc(Instant.now()))
                                     || parse(get(row, "body")).has("source_refs")))
                         throw conflict("SOURCE_CHANGED");
                     if ("sensitive".equals(get(parse(get(row, "body")), "privacy"))) {
@@ -243,7 +245,7 @@ final class Ledger {
                                     oldId)
                             .isEmpty()) throw conflict("SOURCE_CHANGED");
             // 新印象、其经核验的新叶子依赖以及旧印象下游摘要的退役在同一事务内原子提交。
-            var visible = new Reader(store).currentFor(ctx, "CITE", oldId);
+            var visible = reader.currentFor(ctx, "CITE", oldId);
             if (visible == null) throw conflict("SOURCE_CHANGED");
             var oldBody = parse(get(prior, "body"));
             if ("sensitive".equals(get(oldBody, "privacy"))) {

@@ -39,13 +39,12 @@ JOIN revisions v ON v.record_id=r.id AND v.seq=(
 
     private final CellSearch.Mode mode;
 
-    Reader(Store store) {
-        this(store, CellSearch.Mode.LEXICAL);
-    }
+    final Visibility visibility;
 
-    Reader(Store store, CellSearch.Mode mode) {
+    Reader(Store store, CellSearch.Mode mode, Visibility visibility) {
         this.store = store;
         this.mode = mode;
+        this.visibility = visibility;
     }
 
     /**
@@ -183,13 +182,16 @@ WHERE d.derived=?""",
             for (String key : List.of("speaker", "source_venue", "action_id", "assertion", "topic"))
                 if (body.has(key)) out.add(key, body.get(key));
             // 跨会话引用他人原话时去除原会话第一人称语境，避免目标受众把“用户/当前 QQ 私聊”误解为自己。
-            if (!get(row, "conversation").equals(ctx.scope()) && body.has("channel")) {
-                if (get(object(body, "channel"), "type").equals("qq_group_notice"))
+            if (!get(row, "conversation").equals(ctx.scope())) {
+                if (body.has("channel") && get(object(body, "channel"), "type").equals("qq_group_notice"))
                     out.addProperty("member_notice", true);
                 if (out.has("speaker") && "用户".equals(get(out, "speaker")))
                     out.addProperty("speaker", "原发言者");
-                if (out.has("source_venue") && "当前 QQ 私聊".equals(get(out, "source_venue")))
-                    out.addProperty("source_venue", "QQ 私聊");
+                if (out.has("source_venue")) {
+                    String venue = get(out, "source_venue");
+                    if (venue.equals("当前 QQ 私聊") || venue.equals("当前控制台会话"))
+                        out.addProperty("source_venue", venue.substring("当前".length()).stripLeading());
+                }
             }
             // 若断言的 supersedes_ref 指向当前受众无权访问或已失效的跨会话前序记录，则裁剪该引用避免信息泄露。
             if (out.has("assertion")
@@ -232,10 +234,10 @@ AND json_extract(v.body,'$.channel.account_id')=? AND json_extract(v.body,'$.cha
             return "r.kind='observation' AND json_extract(v.body,'$.identity.account_id')=? AND"
                        + " json_extract(v.body,'$.privacy') IN ('private','public')";
         }
-        return Visibility.allowed(ctx, use, args);
+        return visibility.allowed(ctx, use, args);
     }
 
-    /** 解析读取用途 {@code use}：仅 HISTORY 允许指定 READ/CITE，省略时回落为首版同会话 LOCAL 语义。 */
+    /** 只有 HISTORY 接受 READ/CITE；省略时由服务端的会话策略决定普通历史的可见范围。 */
     private static String use(JsonObject req, String purpose) {
         if (!req.has("use")) return "LOCAL";
         if (!purpose.equals("HISTORY")) throw invalid("use");
@@ -245,7 +247,7 @@ AND json_extract(v.body,'$.channel.account_id')=? AND json_extract(v.body,'$.cha
     /** 按受众权限与用途查询某条记录的当前最新版本，不可见或不存在时统一返回 null。 */
     JsonObject currentFor(Access ctx, String use, String id) throws SQLException {
         var args = new ArrayList<Object>();
-        String policy = Visibility.allowed(ctx, use, args);
+        String policy = visibility.allowed(ctx, use, args);
         args.add(id);
         var rows = store.rows(LATEST + " WHERE " + policy + " AND r.id=?", args.toArray());
         return rows.isEmpty() ? null : rows.getFirst();

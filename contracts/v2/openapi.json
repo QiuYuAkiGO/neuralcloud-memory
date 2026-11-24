@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "NeuralCloud Memory",
-    "version": "2.2.0"
+    "version": "2.3.0"
   },
   "security": [
     {
@@ -2036,7 +2036,8 @@
               },
               "member_notice": {"const": true, "description": "跨会话引用的显式 QQ 群通知，按本条正文及精确版本交付。"},
               "grant_dependent": {
-                "const": true
+                "const": true,
+                "description": "本项或其来源跨会话，受众可见性须在后续轮次和交付前复核。"
               },
               "resolved_dates": {
                 "type": "array",
@@ -2271,6 +2272,10 @@
               "minLength": 1,
               "maxLength": 128
             }
+          },
+          "session_isolation": {
+            "type": "boolean",
+            "description": "支持角色内共享开关的服务返回当前设置。false 开放普通记忆现版，true 按会话、授权与已核验的成员关系读取。"
           },
           "retrieval_mode": {
             "type": "string",

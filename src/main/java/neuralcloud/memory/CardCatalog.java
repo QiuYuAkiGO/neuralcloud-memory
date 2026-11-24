@@ -154,7 +154,7 @@ final class CardCatalog {
             throw invalid("title/axis");
         var args = new ArrayList<Object>();
         // 目录与卡片始终要求 CITE 权限，确保跨会话仅授 READ 的记录不会进入可引用目录。
-        String policy = Visibility.allowed(ctx, "CITE", args);
+        String policy = reader.visibility.allowed(ctx, "CITE", args);
         if (query.has("axis")) {
             policy += " AND c.axis=?";
             args.add(one(query, "axis", "PERSON", "SUBJECT"));
