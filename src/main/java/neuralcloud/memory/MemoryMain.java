@@ -225,6 +225,7 @@ public final class MemoryMain {
                                             info.addProperty(
                                                     "retrieval_mode", retrievalMode.name());
                                             info.addProperty("session_isolation", reader.visibility.sessionIsolation());
+                                            info.getAsJsonArray("capabilities").add("identity_lookup");
                                             info.getAsJsonArray("capabilities")
                                                     .add("audience_cards");
                                             if (channelAuthorization != null)

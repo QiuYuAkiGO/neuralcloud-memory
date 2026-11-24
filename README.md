@@ -43,9 +43,9 @@ sessionIsolation=false
 java -jar target/neuralcloud-memory-2.0.0-SNAPSHOT.jar --config memory.properties
 ```
 
-本版默认使用 `sessionIsolation=false`。同一角色的正式 QQ、MistyAI 和控制台会话可互相检索、回读和引用 `public`、`private` 现版记忆，包括其他用户的私聊和群聊。派生材料的来源逐项复核，敏感记录和本人专用查询仍按原有权限处理。
+本版默认使用 `sessionIsolation=false`。同一角色的 QQ、MistyAI 和控制台会话可互相检索、回读和引用 `public`、`private`、`sensitive` 三类现版记忆，包括其他用户的私聊和群聊。所有会话均可通过 `IDENTITY` 按 QQ 号或已确认的完整称呼查询，空查询列出账号与称呼。同一账号的有效称呼相互矛盾时返回冲突，暂不给出该账号的称呼。QQ 私聊的 `SELF_IDENTITY` 和 `SELF_HISTORY` 按本轮真实发件人查询，也包括敏感资料。
 
-恢复隔离时，将上面的值改为 `true` 并在同一数据目录重启 Memory，原会话与已有的有效授权随即生效。开关接受小写 `true` 或 `false`，可通过 `GET /v2/health` 的 `session_isolation` 核对。开关只在服务端启动时设置。
+恢复隔离时，将上面的值改为 `true` 并在同一数据目录重启 Memory。原会话与已有的有效授权随即生效，身份目录及引用目录称呼的回复、摘要和印象也随之收回。开关接受小写 `true` 或 `false`，可通过 `GET /v2/health` 的 `session_isolation` 核对。服务能力 `identity_lookup` 表示支持目录协议。
 
 构建两个仓库后，运行 `python -X utf8 tests/session_isolation.py` 可用合成渠道记录复验默认共享和同库回切。
 

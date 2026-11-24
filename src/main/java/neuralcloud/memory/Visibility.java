@@ -14,7 +14,7 @@ import java.util.List;
  *   <li>生成统一的受众过滤 SQL 条件，供召回排名、原文读取、卡片目录与派生发布共享，确保越权候选在 Top-K 之前即被过滤。</li>
  *   <li>处理经可信 QQ 渠道认证的原作者授权（grant）与撤销（revoke）命令；授权严格绑定到单条原文的精确修订版本。</li>
  * </ul>
- * @param sessionIsolation 为 true 时按会话、原作者授权和已核验成员筛选，为 false 时额外共享普通记忆现版。
+ * @param sessionIsolation 为 true 时按会话、授权和已核验成员筛选，为 false 时共享本角色所有隐私等级的现版。
  */
 record Visibility(boolean sessionIsolation) {
     /** 授予跨会话可见性权限的 HTTP 路由名。 */
@@ -28,45 +28,44 @@ record Visibility(boolean sessionIsolation) {
     /**
      * 构造受众可见性 SQL 谓词，并按占位符顺序将参数追加到 {@code args}。
      *
-     * <p>排名、原文、目录及派生发布均在截断前使用该条件。共享许可只涵盖普通现版，
+     * <p>排名、原文、目录及派生发布均在截断前使用该条件。共享许可涵盖所有隐私等级的现版，
      * 上游逐条核对其确切修订、在线状态及引用权，避免通过一条可读回复带出隐藏来源。
      */
     String allowed(Access ctx, String use, List<Object> args) {
         args.add(ctx.scope());
+        if (!sessionIsolation) {
+            // 本会话保留历史窗口。跨会话只共享现版，派生正文仍须逐一匹配在线来源的修订。
+            return """
+                    (r.conversation=? OR v.revision=r.revision)
+                    AND (r.status<>'ONLINE' OR NOT EXISTS (
+                        SELECT 1 FROM evidence_dependencies d WHERE d.derived=r.id AND NOT EXISTS (
+                            SELECT 1 FROM records p WHERE p.id=d.source AND p.revision=d.revision AND p.status='ONLINE')))
+                    """;
+        }
+        // 已交付过的目录称呼可能不在原始正文里，回切时连同引用它的回复、摘要一起收回。
+        String independent = "json_extract(v.body,'$.requires_identity_lookup') IS NULL AND ";
         String privacy = ctx.externalAudience()
                 ? " AND json_extract(v.body,'$.privacy') IN ('public','private')" : "";
-        boolean explicitUse = !use.equals("LOCAL");
-        if (sessionIsolation && !explicitUse) {
+        if (use.equals("LOCAL")) {
             // 隔离模式下省略 use 的旧客户端只读本会话，包含外会话来源的派生正文也要隐藏。
             args.add(ctx.scope());
-            return "r.conversation=? "
+            return independent + "r.conversation=? "
                     + privacy
                     + " AND NOT EXISTS (SELECT 1 FROM evidence_dependencies d "
                     + "JOIN records p ON p.id=d.source WHERE d.derived=r.id AND p.conversation<>?)";
         }
-        String direct = "(r.conversation=?" + privacy + ")";
-        String sourceRight = "p.conversation=?";
-        if (explicitUse) {
-            direct += """
+        String direct = "(r.conversation=?" + privacy + ")" + """
                      OR (v.revision=r.revision AND EXISTS (
                         SELECT 1 FROM visibility_grants g WHERE g.record_id=r.id AND g.revision=v.revision
                         AND g.target=? AND g.status='ACTIVE' AND (g.use='CITE' OR g.use=?)))
                     """;
-            args.add(ctx.scope());
-            args.add(use);
-            sourceRight = """
+        args.add(ctx.scope());
+        args.add(use);
+        String sourceRight = """
                     EXISTS (SELECT 1 FROM audience_rights a WHERE a.id=p.id AND a.revision=p.revision
                             AND a.audience=? AND a.use='CITE')
                     """;
-        }
-        if (!sessionIsolation) {
-            direct += " OR (v.revision=r.revision AND json_extract(v.body,'$.privacy') IN ('public','private'))";
-            sourceRight += """
-                     OR EXISTS (SELECT 1 FROM revisions pv WHERE pv.record_id=p.id AND pv.revision=p.revision
-                                AND json_extract(pv.body,'$.privacy') IN ('public','private'))
-                    """;
-        }
-        boolean memberAccess = explicitUse && !ctx.memberGroups().isEmpty();
+        boolean memberAccess = !ctx.memberGroups().isEmpty();
         if (memberAccess) {
             String memberNotices = MEMBER_NOTICES.formatted(
                     String.join(",", java.util.Collections.nCopies(ctx.memberGroups().size(), "?")));
@@ -77,7 +76,7 @@ record Visibility(boolean sessionIsolation) {
         args.add(ctx.scope());
         if (memberAccess) args.addAll(ctx.memberGroups());
         // 失效记录只交付状态。在线记录的所有递归来源均须在当前受众下可引用。
-        return """
+        return independent + """
             (%s)
             AND (r.status<>'ONLINE' OR NOT EXISTS (
                SELECT 1 FROM evidence_dependencies d WHERE d.derived=r.id AND NOT EXISTS (
