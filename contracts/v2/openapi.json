@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "NeuralCloud Memory",
-    "version": "2.2.0"
+    "version": "2.3.0"
   },
   "security": [
     {
@@ -10,6 +10,58 @@
     }
   ],
   "paths": {
+    "/v2/dreaming/batch": {
+      "post": {
+        "operationId": "dreamingBatch",
+        "requestBody": {"required":true,"content":{"application/json":{"schema":{"$ref":"#/components/schemas/DreamBatchRequest"}}}},
+        "responses": {
+          "200": {"description":"成功","content":{"application/json":{"schema":{"$ref":"#/components/schemas/DreamBatch"}}}},
+          "401": {"description":"拒绝请求","content":{"application/json":{"schema":{"$ref":"#/components/schemas/Error"}}}},
+          "403": {"description":"拒绝请求","content":{"application/json":{"schema":{"$ref":"#/components/schemas/Error"}}}},
+          "409": {"description":"拒绝请求","content":{"application/json":{"schema":{"$ref":"#/components/schemas/Error"}}}},
+          "422": {"description":"拒绝请求","content":{"application/json":{"schema":{"$ref":"#/components/schemas/Error"}}}}
+        }
+      }
+    },
+    "/v2/dreaming/commit": {
+      "post": {
+        "operationId": "dreamingCommit",
+        "requestBody": {"required":true,"content":{"application/json":{"schema":{"$ref":"#/components/schemas/DreamCommit"}}}},
+        "responses": {
+          "200": {"description":"成功","content":{"application/json":{"schema":{"$ref":"#/components/schemas/DreamReceipt"}}}},
+          "401": {"description":"拒绝请求","content":{"application/json":{"schema":{"$ref":"#/components/schemas/Error"}}}},
+          "403": {"description":"拒绝请求","content":{"application/json":{"schema":{"$ref":"#/components/schemas/Error"}}}},
+          "409": {"description":"拒绝请求","content":{"application/json":{"schema":{"$ref":"#/components/schemas/Error"}}}},
+          "422": {"description":"拒绝请求","content":{"application/json":{"schema":{"$ref":"#/components/schemas/Error"}}}}
+        }
+      }
+    },
+    "/v2/dreaming/receipt": {
+      "post": {
+        "operationId": "dreamingReceipt",
+        "requestBody": {"required":true,"content":{"application/json":{"schema":{"$ref":"#/components/schemas/DreamLookup"}}}},
+        "responses": {
+          "200": {"description":"成功","content":{"application/json":{"schema":{"$ref":"#/components/schemas/DreamReceiptResult"}}}},
+          "401": {"description":"拒绝请求","content":{"application/json":{"schema":{"$ref":"#/components/schemas/Error"}}}},
+          "403": {"description":"拒绝请求","content":{"application/json":{"schema":{"$ref":"#/components/schemas/Error"}}}},
+          "409": {"description":"拒绝请求","content":{"application/json":{"schema":{"$ref":"#/components/schemas/Error"}}}},
+          "422": {"description":"拒绝请求","content":{"application/json":{"schema":{"$ref":"#/components/schemas/Error"}}}}
+        }
+      }
+    },
+    "/v2/dreaming/profiles": {
+      "post": {
+        "operationId": "dreamingProfiles",
+        "requestBody": {"required":true,"content":{"application/json":{"schema":{"$ref":"#/components/schemas/DreamRead"}}}},
+        "responses": {
+          "200": {"description":"成功","content":{"application/json":{"schema":{"$ref":"#/components/schemas/DreamProfiles"}}}},
+          "401": {"description":"拒绝请求","content":{"application/json":{"schema":{"$ref":"#/components/schemas/Error"}}}},
+          "403": {"description":"拒绝请求","content":{"application/json":{"schema":{"$ref":"#/components/schemas/Error"}}}},
+          "409": {"description":"拒绝请求","content":{"application/json":{"schema":{"$ref":"#/components/schemas/Error"}}}},
+          "422": {"description":"拒绝请求","content":{"application/json":{"schema":{"$ref":"#/components/schemas/Error"}}}}
+        }
+      }
+    },
     "/v2/ingest": {
       "post": {
         "operationId": "ingest",
@@ -1143,6 +1195,140 @@
       }
     },
     "schemas": {
+      "DreamBatchRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "context": {"$ref":"#/components/schemas/Context"},
+          "scopes": {"type":"array","items":{"type":"string","minLength":1,"maxLength":256},"minItems":0,"maxItems":1024,"uniqueItems":true},
+          "limit": {"type":"integer","minimum":1,"maximum":16}
+        },
+        "required": ["context","scopes","limit"]
+      },
+      "DreamChange": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {"enum":["person","topic"]},
+          "subject": {"type":"string","minLength":1,"maxLength":128},
+          "expected_version": {"type":"integer","minimum":0},
+          "text": {"type":"string","minLength":1,"maxLength":2048},
+          "scope": {"type":"string","minLength":1,"maxLength":512},
+          "reason": {"type":"string","minLength":1,"maxLength":1024},
+          "source_refs": {"type":"array","items":{"$ref":"#/components/schemas/RecordRef"},"minItems":1,"maxItems":16,"uniqueItems":true}
+        },
+        "required": ["kind","subject","expected_version","text","scope","reason","source_refs"]
+      },
+      "DreamProfile": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {"enum":["person","topic"]},
+          "subject": {"type":"string","minLength":1,"maxLength":128},
+          "version": {"type":"integer","minimum":1},
+          "author": {"const":"DREAMING"},
+          "text": {"type":"string","minLength":1,"maxLength":2048},
+          "scope": {"type":"string","minLength":1,"maxLength":512},
+          "reason": {"type":"string","minLength":1,"maxLength":1024},
+          "source_refs": {"type":"array","items":{"$ref":"#/components/schemas/RecordRef"},"minItems":1,"maxItems":16,"uniqueItems":true}
+        },
+        "required": ["kind","subject","version","author","text","scope","reason","source_refs"]
+      },
+      "DreamIdentity": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {"enum":["person","topic"]},
+          "subject": {"type":"string","minLength":1,"maxLength":128},
+          "version": {"type":"integer","minimum":1}
+        },
+        "required": ["kind","subject","version"]
+      },
+      "DreamEvidence": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "record_id": {"type":"string","pattern":"^[0-9a-f]{64}$"},
+          "revision": {"type":"integer","minimum":1},
+          "conversation_id": {"type":"string","minLength":1,"maxLength":256},
+          "kind": {"enum":["observation","self_expression","tool_result"]},
+          "content": {"type":"string"},
+          "occurred_at": {"type":"string","minLength":1,"maxLength":64},
+          "speaker": {"type":"string","minLength":1,"maxLength":256},
+          "topic": {"type":"string","minLength":1,"maxLength":128},
+          "source_venue": {"type":"string","minLength":1,"maxLength":256},
+          "sender_id": {"type":"string","minLength":1,"maxLength":128}
+        },
+        "required": ["record_id","revision","conversation_id","kind","content","occurred_at"]
+      },
+      "DreamBatch": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "stream_id": {"type":"string","format":"uuid"},
+          "policy_version": {"type":"integer","minimum":1},
+          "after": {"type":"integer","minimum":0},
+          "through": {"type":"integer","minimum":0},
+          "evidence": {"type":"array","items":{"$ref":"#/components/schemas/DreamEvidence"},"minItems":0},
+          "profiles": {"type":"array","items":{"oneOf":[{"$ref":"#/components/schemas/DreamProfile"},{"$ref":"#/components/schemas/DreamIdentity"}]},"minItems":0}
+        },
+        "required": ["stream_id","policy_version","after","through","evidence","profiles"]
+      },
+      "DreamCommit": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "context": {"$ref":"#/components/schemas/Context"},
+          "source_instance": {"type":"string","minLength":1,"maxLength":128},
+          "event_id": {"type":"string","minLength":1,"maxLength":256},
+          "stream_id": {"type":"string","format":"uuid"},
+          "policy_version": {"type":"integer","minimum":1},
+          "after": {"type":"integer","minimum":0},
+          "through": {"type":"integer","minimum":0},
+          "changes": {"type":"array","items":{"$ref":"#/components/schemas/DreamChange"},"minItems":0,"maxItems":8}
+        },
+        "required": ["context","source_instance","event_id","stream_id","policy_version","after","through","changes"]
+      },
+      "DreamLookup": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "context": {"$ref":"#/components/schemas/Context"},
+          "source_instance": {"type":"string","minLength":1,"maxLength":128},
+          "event_id": {"type":"string","minLength":1,"maxLength":256}
+        },
+        "required": ["context","source_instance","event_id"]
+      },
+      "DreamRead": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "context": {"$ref":"#/components/schemas/Context"}
+        },
+        "required": ["context"]
+      },
+      "DreamProfiles": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "profiles": {"type":"array","items":{"$ref":"#/components/schemas/DreamProfile"},"minItems":0}
+        },
+        "required": ["profiles"]
+      },
+      "DreamReceipt": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "status": {"const":"DURABLE"},
+          "event_id": {"type":"string","minLength":1,"maxLength":256},
+          "stream_id": {"type":"string","format":"uuid"},
+          "policy_version": {"type":"integer","minimum":1},
+          "after": {"type":"integer","minimum":0},
+          "through": {"type":"integer","minimum":0}
+        },
+        "required": ["status","event_id","stream_id","policy_version","after","through"]
+      },
+      "DreamReceiptResult": {"oneOf":[{"$ref":"#/components/schemas/DreamReceipt"},{"type":"object","additionalProperties":false,"properties":{"status":{"const":"NOT_FOUND"}},"required":["status"]}]},
       "Context": {
         "type": "object",
         "additionalProperties": false,
