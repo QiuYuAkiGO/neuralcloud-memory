@@ -16,11 +16,16 @@ import com.google.gson.*;
  * @param role    调用方角色（ROUTER / MASTER / CHAT_WORKER / TASK_WORKER / ORCHESTRATOR）
  * @param account 可信 QQ 渠道绑定的机器人账号，非 QQ 私聊上下文时为 null
  * @param peer    可信 QQ 私聊入站的对端用户账号，非 QQ 私聊上下文时为 null
- * @param mobileGroup 已认证移动成员所属的群会话，仅该成员的私聊上下文持有
+ * @param memberGroups 本次 QQ 或移动渠道已核验的群会话，仅该成员的私聊上下文持有
  */
 record Access(
-        String scope, String session, String actor, String role, String account, String peer,
-        String mobileGroup) {
+        String scope,
+        String session,
+        String actor,
+        String role,
+        String account,
+        String peer,
+        java.util.List<String> memberGroups) {
     /**
      * 在请求边界解析并校验 context 对象。
      * 业务约束：角色 ID 必须与当前 Memory 实例绑定的一致；凡以 c2c:onebot: 开头的私聊会话
@@ -35,13 +40,25 @@ record Access(
         String role =
                 one(ctx, "role", "ROUTER", "MASTER", "CHAT_WORKER", "TASK_WORKER", "ORCHESTRATOR");
         String account = null, peer = null;
+        var groups = new java.util.ArrayList<String>();
         if (ctx.has("qq")) {
             var qq = object(ctx, "qq");
-            keys(qq, "account_id peer_id");
+            keys(qq, "account_id peer_id member_group_ids");
             account = qqId(qq, "account_id");
             peer = qqId(qq, "peer_id");
             // QQ 上下文只能用于对应的单聊会话，避免将私聊身份错误绑定到群聊或其他控制台会话。
             if (!scope.equals("c2c:onebot:" + account + ":" + peer)) throw denied();
+            // 只有受信渠道可填本次 OneBot 核验的群号，群归属始终按已认证机器人账号拼接。
+            if (qq.has("member_group_ids")) {
+                var ids = new java.util.HashSet<String>();
+                for (var element : array(qq, "member_group_ids", 1, 256)) {
+                    if (!(element instanceof JsonPrimitive id)
+                            || !id.isString()
+                            || !id.getAsString().matches("[1-9][0-9]{4,15}")
+                            || !ids.add(id.getAsString())) throw invalid("member_group_ids");
+                    groups.add("group:onebot:" + account + ":" + id.getAsString());
+                }
+            }
         }
         // 私聊会话禁止省略 qq 身份段，否则无法区分本人发言和受众隐私边界。
         if (scope.startsWith("c2c:onebot:") && peer == null) throw denied();
@@ -53,9 +70,11 @@ record Access(
             String instance = mobileInstance(member, "instance"), id = mobileId(member, "member_id");
             if (!scope.equals("c2c:mistyai:" + instance + ":" + id)) throw denied();
             mobileGroup = "group:mistyai:" + instance;
+            groups.add(mobileGroup);
         }
         if (scope.startsWith("c2c:mistyai:") && mobileGroup == null) throw denied();
-        return new Access(scope, session, actor, role, account, peer, mobileGroup);
+        return new Access(
+                scope, session, actor, role, account, peer, java.util.List.copyOf(groups));
     }
 
     /** 实例名与成员、消息的正整数 ID 均由移动服务分配，字符集保证会话各段无歧义。 */
@@ -73,7 +92,7 @@ record Access(
 
     /** 已认证的外部私聊受众共用敏感正文限制。 */
     boolean externalAudience() {
-        return peer != null || mobileGroup != null;
+        return peer != null || !memberGroups.isEmpty();
     }
 
     /** 校验 QQ 号格式：5~16 位十进制数字且不以 0 开头。 */

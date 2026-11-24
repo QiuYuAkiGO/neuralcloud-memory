@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "NeuralCloud Memory",
-    "version": "2.2.0"
+    "version": "2.4.0"
   },
   "security": [
     {
@@ -1188,6 +1188,11 @@
               "peer_id": {
                 "type": "string",
                 "pattern": "^[1-9][0-9]{4,15}$"
+              },
+              "member_group_ids": {
+                "description": "可信 QQ 渠道在处理本次私聊时核验的已接收群。仅可引用该群显式通知的在线现版。",
+                "type": "array", "uniqueItems": true, "minItems": 1, "maxItems": 256,
+                "items": {"type": "string", "pattern": "^[1-9][0-9]{4,15}$"}
               }
             },
             "required": [
@@ -1255,6 +1260,26 @@
           "revision"
         ]
       },
+      "SourceRef": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "record_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1
+          },
+          "purpose": {
+            "const": "IDENTITY",
+            "description": "来源是身份目录中确认的账号与称呼，派生正文随目录可见性一起回切。"
+          }
+        },
+        "required": ["record_id", "revision"]
+      },
       "Assertion": {
         "type": "object",
         "additionalProperties": false,
@@ -1310,7 +1335,8 @@
                 "type": "string",
                 "enum": [
                   "qq_private",
-                  "qq_group"
+                  "qq_group",
+                  "qq_group_notice"
                 ]
               },
               "account_id": {
@@ -1433,7 +1459,7 @@
           "source_refs": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/RecordRef"
+              "$ref": "#/components/schemas/SourceRef"
             },
             "minItems": 1,
             "maxItems": 128
@@ -1550,7 +1576,7 @@
           "source_refs": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/RecordRef"
+              "$ref": "#/components/schemas/SourceRef"
             },
             "minItems": 1,
             "maxItems": 128
@@ -1668,7 +1694,10 @@
             ]
           },
           "channel": {
-            "$ref": "#/components/schemas/MobileNoticeChannel"
+            "oneOf": [
+              {"$ref": "#/components/schemas/MobileNoticeChannel"},
+              {"allOf": [{"$ref": "#/components/schemas/Channel"}, {"properties": {"type": {"const": "qq_group_notice"}}}]}
+            ]
           }
         },
         "required": [
@@ -1777,7 +1806,8 @@
             "enum": [
               "HISTORY",
               "SELF_IDENTITY",
-              "SELF_HISTORY"
+              "SELF_HISTORY",
+              "IDENTITY"
             ]
           },
           "targets": {
@@ -1821,7 +1851,7 @@
               "READ",
               "CITE"
             ],
-            "description": "省略沿用首版会话范围。显式 READ 交付只读正文，CITE 交付可在当前会话引用的正文。"
+            "description": "仅 HISTORY 可指定。省略时按当前会话隔离设置读取，READ 交付只读正文，CITE 交付可在当前会话引用的正文。"
           }
         },
         "required": [
@@ -1857,7 +1887,8 @@
             "enum": [
               "HISTORY",
               "SELF_IDENTITY",
-              "SELF_HISTORY"
+              "SELF_HISTORY",
+              "IDENTITY"
             ]
           },
           "query": {
@@ -1912,7 +1943,7 @@
               "READ",
               "CITE"
             ],
-            "description": "省略沿用首版会话范围。显式 READ 交付只读正文，CITE 交付可在当前会话引用的正文。"
+            "description": "仅 HISTORY 可指定。省略时按当前会话隔离设置读取，READ 交付只读正文，CITE 交付可在当前会话引用的正文。"
           }
         },
         "required": [
@@ -1922,7 +1953,7 @@
           "profile",
           "limit"
         ],
-        "description": "SELF_IDENTITY 的 query 为空。SELF_HISTORY 绑定入站 QQ 私聊、before 与 1–16 的 limit。before 为排他的发言时间上界。",
+        "description": "IDENTITY 的 query 是 QQ 账号、完整确认称呼或用于列举的空串，结果携带 identity_account_id，按账号核对冲突。SELF_IDENTITY 的 query 为空，绑定入站身份。SELF_HISTORY 绑定入站 QQ 私聊、before 与 1–16 的 limit。before 为排他的发言时间上界。",
         "allOf": [
           {
             "if": {
@@ -2025,8 +2056,15 @@
               "use": {
                 "const": "READ"
               },
+              "member_notice": {"const": true, "description": "跨会话引用的显式 QQ 群通知，按本条正文及精确版本交付。"},
+              "identity_account_id": {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{4,15}$",
+                "description": "IDENTITY 结果所描述的 QQ 账号，text 为该账号的已确认称呼。"
+              },
               "grant_dependent": {
-                "const": true
+                "const": true,
+                "description": "本项依赖共享开关、跨会话来源或授权，须在后续轮次和交付前按原用途复核。"
               },
               "resolved_dates": {
                 "type": "array",
@@ -2261,6 +2299,10 @@
               "minLength": 1,
               "maxLength": 128
             }
+          },
+          "session_isolation": {
+            "type": "boolean",
+            "description": "false 对角色的所有会话开放全部隐私级别和已确认身份目录，true 恢复会话、授权、成员与本人验证范围。identity_lookup 能力表示实现目录协议。"
           },
           "retrieval_mode": {
             "type": "string",

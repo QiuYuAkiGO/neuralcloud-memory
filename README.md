@@ -36,11 +36,18 @@ dataDirectory=./memory-data
 characterId=misty-dev
 sourceInstance=neuralcloud-java
 accessTokenEnv=NC_MEMORY_TOKEN
+sessionIsolation=false
 ```
 
 ```powershell
 java -jar target/neuralcloud-memory-2.0.0-SNAPSHOT.jar --config memory.properties
 ```
+
+本版默认使用 `sessionIsolation=false`。同一角色的 QQ、MistyAI 和控制台会话可互相检索、回读和引用 `public`、`private`、`sensitive` 三类现版记忆，包括其他用户的私聊和群聊。所有会话均可通过 `IDENTITY` 按 QQ 号或已确认的完整称呼查询，空查询列出账号与称呼。同一账号的有效称呼相互矛盾时返回冲突，暂不给出该账号的称呼。QQ 私聊的 `SELF_IDENTITY` 和 `SELF_HISTORY` 按本轮真实发件人查询，也包括敏感资料。
+
+恢复隔离时，将上面的值改为 `true` 并在同一数据目录重启 Memory。原会话与已有的有效授权随即生效，身份目录及引用目录称呼的回复、摘要和印象也随之收回。开关接受小写 `true` 或 `false`，可通过 `GET /v2/health` 的 `session_isolation` 核对。服务能力 `identity_lookup` 表示支持目录协议。
+
+构建两个仓库后，运行 `python -X utf8 tests/session_isolation.py` 可用合成渠道记录复验默认共享和同库回切。
 
 为 Harness 创建客户端配置，在已有控制台配置中将 `memoryConfig` 指向该文件的绝对路径。Windows 的 properties 路径可使用正斜杠。
 
@@ -64,7 +71,7 @@ java -cp java/target/neuralcloud-control-plane-0.1.0-SNAPSHOT.jar neuralcloud.co
 
 - Memory 配置增加 `grantAccountId` 和 `grantAccessTokenEnv`。后者指定独立的渠道凭据环境变量，值为 32 至 256 位可见 ASCII 字符。Harness 的 v2 scoped 记忆配置增加同一个 `grantAccessTokenEnv`，OpenQQ 配置的 `accountId` 与 Memory 对应。需要处理群消息时，在 OpenQQ 配置增加 `allowedGroupId`，群内 @ 机器人的纯文本消息才进入会话。
 - 原作者私聊发送 `/memory grant <record_id>@<revision> <目标会话> READ|CITE <理由>`。例如目标私聊的标识为 `c2c:onebot:<机器人号>:<接收者号>`。渠道返回授权 ID，原作者可发 `/memory revoke <grant_id> <理由>` 撤销。模型和网页转录均无法代替渠道身份。
-- `READ` 允许专用读取方请求原文窗口。面向用户的三个 Worker 均以 `CITE` 读取。省略 `use` 的旧客户端沿用首版可见范围。修订、撤回或撤权后，Worker 再次查询所获正文及派生项时按当前受众复核。授权决定和记录修订使用同一个变更流。[请求与回执示例](contracts/v2/examples/visibility-grant.json)
+- `READ` 允许专用读取方请求原文窗口。面向用户的三个 Worker 均以 `CITE` 读取。隔离开启时，省略 `use` 的旧客户端沿用首版可见范围。修订、撤回或撤权后，Worker 再次查询所获正文及派生项时按当前受众复核。授权决定和记录修订使用同一个变更流。[请求与回执示例](contracts/v2/examples/visibility-grant.json)
 
 构建两个仓库后，使用下列命令复跑。第一条覆盖模型边界、进程中断与行动计数，第二条在设置 `GEMINI_API_KEY` 的环境中经真实 Gemini 验证授权前、授权后和撤销后的渠道回复。两次运行各使用隔离的 OneBot 测试渠道和数据目录。[阶段 2 验收报告](docs/acceptance/memory-v2-stage-2.md)
 
@@ -86,7 +93,7 @@ python -u tests/stage2.py --harness ../neuralcloud-harness --gemini
 
 ## 阶段 3、4 的配置与回放
 
-Memory 默认使用 `retrievalMode=CELLS`，后台整理间隔默认为 30 秒。在配有单一 llama.cpp Master 的 Harness 客户端配置中设置 `hotIndexTokens=96`，可启用按实际分词计数的常驻人物、事项和期限目录。通过 `POST /v2/cards` 读取 L0 或 L1，再用带版本的来源引用读取 L2。原作者的跨会话引用授权同样约束目录与摘要。[字段和生效时间规则](docs/proposals/neuralcloud-memory-v2-architecture-and-data-contracts.md)
+Memory 默认使用 `retrievalMode=CELLS`，后台整理间隔默认为 30 秒。在配有单一 llama.cpp Master 的 Harness 客户端配置中设置 `hotIndexTokens=96`，可启用按实际分词计数的常驻人物、事项和期限目录。通过 `POST /v2/cards` 读取 L0 或 L1，再用带版本的来源引用读取 L2。目录和摘要在查询时按当前共享设置和有效授权复核来源。[字段和生效时间规则](docs/proposals/neuralcloud-memory-v2-architecture-and-data-contracts.md)
 
 首次复跑时，在忽略目录构建已验证的阶段 1 历史版本。两个工作树可在后续回放复用。
 

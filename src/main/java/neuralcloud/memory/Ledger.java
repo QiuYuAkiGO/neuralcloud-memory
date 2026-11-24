@@ -23,9 +23,11 @@ final class Ledger {
     /** 所有写命令共用的顶层必选字段前缀。 */
     private static final String COMMAND = "context source_instance event_id ";
     private final Store store;
+    private final Reader reader;
 
-    Ledger(Store store) {
+    Ledger(Store store, Reader reader) {
         this.store = store;
+        this.reader = reader;
     }
 
     /**
@@ -114,7 +116,7 @@ final class Ledger {
      * <ul>
      *   <li>原始入账支持 observation/self_expression/tool_* /delivery_receipt，仅 self_expression 允许携带已送达的 source_refs。</li>
      *   <li>派生候选支持 summary/impression（impression 仅限 author=MASTER），逐一复核所有 source_refs 在当前受众下处于 ONLINE 且可 CITE。</li>
-     *   <li>若任一来源为 sensitive，则派生项继承 sensitive 隐私等级，且禁止在 QQ 私聊受众中创建。</li>
+     *   <li>派生项继承敏感来源的等级和目录引用的用途。隔离模式下外部私聊受众无法据敏感来源创建候选。</li>
      *   <li>若携带 {@code replaces_impression}（仅 ORCHESTRATOR），验证新叶子均为当前活跃原始证据后，在同一事务中退役旧印象并失效其下游。</li>
      * </ul>
      */
@@ -189,14 +191,17 @@ final class Ledger {
             for (var e : array(cmd, "source_refs", 1, 128)) {
                 if (!e.isJsonObject()) throw invalid("source_refs");
                 var ref = e.getAsJsonObject();
-                keys(ref, "record_id revision");
+                keys(ref, "record_id revision purpose");
                 String rid = id(ref, "record_id");
                 long expected = number(ref, "revision", 1, Long.MAX_VALUE);
+                String purpose = ref.has("purpose") ? one(ref, "purpose", "IDENTITY") : "HISTORY";
+                JsonObject sourceBody;
                 if (candidate) {
-                    var row = new Reader(store).currentFor(ctx, "CITE", rid);
+                    var row = reader.currentFor(ctx, purpose, "CITE", rid);
                     if (row == null
                             || !get(row, "status").equals("ONLINE")
                             || num(row, "revision") != expected) throw conflict("SOURCE_CHANGED");
+                    sourceBody = parse(get(row, "body"));
                     // 修订印象时，新证据必须是直接的一手记录（非派生、无 source_refs）且其断言当前仍有效，防止用过时或二次转述覆盖印象。
                     if (cmd.has("replaces_impression")
                             && (!Set.of(
@@ -206,21 +211,17 @@ final class Ledger {
                                                     "tool_result",
                                                     "delivery_receipt")
                                             .contains(get(row, "kind"))
-                                    || !new Reader(store).currentClaim(ctx, row, utc(Instant.now()))
-                                    || parse(get(row, "body")).has("source_refs")))
+                                    || !reader.currentClaim(ctx, row, utc(Instant.now()))
+                                    || sourceBody.has("source_refs")))
                         throw conflict("SOURCE_CHANGED");
-                    if ("sensitive".equals(get(parse(get(row, "body")), "privacy"))) {
-                        if (ctx.externalAudience()) throw denied();
-                        body.addProperty("privacy", "sensitive");
-                    }
-                } else if (store.rows(
-                                "SELECT 1 FROM revisions WHERE record_id=? AND revision=?",
-                                rid,
-                                expected)
-                        .isEmpty()) {
-                    throw conflict("SOURCE_CHANGED");
+                } else {
+                    // 渠道可以晚于撤权补记已送达事实。按送达时的确切修订继承资料用途与敏感级别。
+                    var revision = store.rows("SELECT body FROM revisions WHERE record_id=? AND revision=?", rid, expected);
+                    if (revision.isEmpty()) throw conflict("SOURCE_CHANGED");
+                    sourceBody = parse(get(revision.getFirst(), "body"));
+                    if (purpose.equals("IDENTITY") && !sourceBody.has("identity")) throw conflict("SOURCE_CHANGED");
                 }
-                // 已送达的渠道正文如实入账。即使在写回之前撤权，此依赖也会阻止再次交付旧正文。
+                inheritVisibility(ctx, body, sourceBody, purpose, candidate);
                 store.update("INSERT OR IGNORE INTO sources VALUES(?,?,?)", id, rid, expected);
             }
         }
@@ -243,13 +244,10 @@ final class Ledger {
                                     oldId)
                             .isEmpty()) throw conflict("SOURCE_CHANGED");
             // 新印象、其经核验的新叶子依赖以及旧印象下游摘要的退役在同一事务内原子提交。
-            var visible = new Reader(store).currentFor(ctx, "CITE", oldId);
+            var visible = reader.currentFor(ctx, "CITE", oldId);
             if (visible == null) throw conflict("SOURCE_CHANGED");
             var oldBody = parse(get(prior, "body"));
-            if ("sensitive".equals(get(oldBody, "privacy"))) {
-                if (ctx.externalAudience()) throw denied();
-                body.addProperty("privacy", "sensitive");
-            }
+            inheritVisibility(ctx, body, oldBody, "HISTORY", true);
             // 若旧印象仍在线且新印象未指定新标题，自动沿用旧 topic 保持事项卡归类连贯。
             if (get(prior, "status").equals("ONLINE") && !body.has("topic") && oldBody.has("topic"))
                 body.add("topic", oldBody.get("topic"));
@@ -258,6 +256,16 @@ final class Ledger {
         version(id, 1, occurred, body, candidate ? "CANDIDATE" : "INGEST");
         notifyPredecessors(body, null);
         return id;
+    }
+
+    /** 送达正文和各级派生材料继承来源限制，避免回切后从摘要或印象中重新读出目录称呼。 */
+    private void inheritVisibility(Access ctx, JsonObject body, JsonObject source, String purpose, boolean candidate) {
+        if ("sensitive".equals(get(source, "privacy"))) {
+            if (candidate && reader.visibility.sessionIsolation() && ctx.externalAudience()) throw denied();
+            body.addProperty("privacy", "sensitive");
+        }
+        if (purpose.equals("IDENTITY") || source.has("requires_identity_lookup"))
+            body.addProperty("requires_identity_lookup", true);
     }
 
     /** 校验渠道元数据与会话的一致性。只有移动群的明确通知可以取得成员引用权。 */
@@ -272,7 +280,9 @@ final class Ledger {
                     || !group.equals(text(channel, "conversation_id", 256))) throw denied();
             return;
         }
-        String type = one(channel, "type", "qq_private", "qq_group");
+        String type = one(channel, "type", "qq_private", "qq_group", "qq_group_notice");
+        if (type.equals("qq_group_notice") && !kind.equals("observation"))
+            throw invalid("channel.type");
         String account = Access.qqId(channel, "account_id"),
                 sender = Access.qqId(channel, "sender_id");
         String scope = text(channel, "conversation_id", 256);
@@ -359,13 +369,18 @@ final class Ledger {
         var body = previousBody.deepCopy();
         // 群通知的每次替换或撤回来自同一作者的新群消息；保留各版实际消息 ID 供审计。
         var priorChannel = previousBody.getAsJsonObject("channel");
-        boolean notice = priorChannel != null && "mistyai".equals(get(priorChannel, "platform"));
+        boolean notice =
+                priorChannel != null
+                        && Set.of("mobile_group_notice", "qq_group_notice")
+                                .contains(get(priorChannel, "type"));
         if (notice != cmd.has("channel")) throw invalid("channel");
         if (notice) {
             var next = object(cmd, "channel");
             channel(ctx, next, get(old, "kind"));
-            if (!"mistyai".equals(get(next, "platform"))
-                    || !get(priorChannel, "sender_id").equals(get(next, "sender_id"))) throw denied();
+            if (!get(priorChannel, "type").equals(get(next, "type"))
+                    || !get(priorChannel, "account_id").equals(get(next, "account_id"))
+                    || !get(priorChannel, "sender_id").equals(get(next, "sender_id")))
+                throw denied();
             if (get(priorChannel, "message_id").equals(get(next, "message_id"))) throw invalid("message_id");
             body.add("channel", next);
         }
@@ -513,16 +528,20 @@ WHERE r.conversation=? AND r.id=?""",
         if (body.has("assertion")) store.indexClaim(id, rev, object(body, "assertion"));
         unindex(id);
         if (!op.equals("RETRACT")) {
-            CellSearch.index(store, id, body);
-            String searchable = get(body, "content");
-            for (String k : List.of("speaker", "action_id"))
-                if (body.has(k)) searchable += " " + get(body, k);
-            if (body.has("assertion"))
-                searchable += " " + get(object(body, "assertion"), "subject_id");
-            store.update(
-                    "INSERT INTO search(rowid,terms) SELECT rowid,? FROM records WHERE id=?",
-                    String.join(" ", Terms.terms(searchable)),
-                    id);
+            index(store, id, body);
         }
+    }
+
+    /** 正常入账和离线迁移共用相同的在线词表与事件单元索引。 */
+    static void index(Store store, String id, JsonObject body) throws SQLException {
+        CellSearch.index(store, id, body);
+        String searchable = get(body, "content");
+        for (String k : List.of("speaker", "action_id"))
+            if (body.has(k)) searchable += " " + get(body, k);
+        if (body.has("assertion")) searchable += " " + get(object(body, "assertion"), "subject_id");
+        store.update(
+                "INSERT INTO search(rowid,terms) SELECT rowid,? FROM records WHERE id=?",
+                String.join(" ", Terms.terms(searchable)),
+                id);
     }
 }
