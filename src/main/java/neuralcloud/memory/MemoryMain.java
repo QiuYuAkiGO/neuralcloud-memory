@@ -47,11 +47,13 @@ public final class MemoryMain {
             String token,
             String channelToken,
             String grantAccount,
-            CellSearch.Mode retrievalMode) {
+            CellSearch.Mode retrievalMode,
+            Visibility visibility) {
         this.store = store;
-        ledger = new Ledger(store);
         this.retrievalMode = retrievalMode;
-        reader = new Reader(store, retrievalMode);
+        // 召回、卡片和提交派生项时的证据检查共用服务启动时确定的受众策略。
+        reader = new Reader(store, retrievalMode, visibility);
+        ledger = new Ledger(store, reader);
         catalog = new CardCatalog(store, reader);
         authorization = ("Bearer " + token).getBytes(StandardCharsets.UTF_8);
         channelAuthorization =
@@ -78,6 +80,12 @@ public final class MemoryMain {
         var fields = new HashSet<>(settings.stringPropertyNames());
         fields.remove("retrievalMode");
         fields.remove("organizeIntervalSeconds");
+        fields.remove("sessionIsolation");
+        var visibility = new Visibility(switch (settings.getProperty("sessionIsolation", "false")) {
+            case "true" -> true;
+            case "false" -> false;
+            default -> throw new IllegalArgumentException("sessionIsolation must be true or false");
+        });
         var mode = CellSearch.Mode.valueOf(settings.getProperty("retrievalMode", "CELLS"));
         int interval = Integer.parseInt(settings.getProperty("organizeIntervalSeconds", "30"));
         if (interval < 0 || interval > 86400)
@@ -119,7 +127,7 @@ public final class MemoryMain {
                         character,
                         source);
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", port), 64);
-        var service = new MemoryMain(store, token, channelToken, account, mode);
+        var service = new MemoryMain(store, token, channelToken, account, mode, visibility);
         server.createContext("/v2/", service::handle);
         // 后台单线程定时追赶人物/事项卡目录并清理已到期指针；interval=0 时关闭定时任务（仍可显式调 /v2/organize）。
         var organizer = Executors.newSingleThreadScheduledExecutor();
@@ -216,6 +224,8 @@ public final class MemoryMain {
                                                     .add("qq_member_notices");
                                             info.addProperty(
                                                     "retrieval_mode", retrievalMode.name());
+                                            info.addProperty("session_isolation", reader.visibility.sessionIsolation());
+                                            info.getAsJsonArray("capabilities").add("identity_lookup");
                                             info.getAsJsonArray("capabilities")
                                                     .add("audience_cards");
                                             if (channelAuthorization != null)
