@@ -2,6 +2,10 @@
 
 Java 21 记忆服务负责原文与修订、派生来源、全文检索、持久回执和变更流。`neuralcloud-harness` 通过回环 HTTP 写入和查询，在自己的审计目录登记实际交给模型的证据。两个 JVM 分别持有自己的 SQLite 数据库。[架构与数据契约草案](docs/proposals/neuralcloud-memory-v2-architecture-and-data-contracts.md) · [阶段 0 和 1 验收报告](docs/acceptance/memory-v2-stage-0-1.md)
 
+## Dreaming 档案
+
+启用 Dreaming 的 Harness 使用 `/v2/dreaming/batch` 领取一手材料，通过 `commit` 和 `receipt` 推进独立覆盖水位。`/v2/dreaming/profiles` 按受众复核每条依据的 CITE 权限。启动时自动将既有 v2 至 v4 角色库迁移到 schema 5，保留原始流与 Master 印象。构建两仓后运行 `python -X utf8 tests/dreaming.py` 可复验整理、授权、修订、撤回与重启。[HTTP 契约](contracts/v2/openapi.json)
+
 ## 构建和复跑首版验收
 
 在本仓库根目录执行，默认两个仓库位于同一父目录。`java`、`javac`、`keytool` 使用 JDK 21。回放另需 Maven、Python 3.9 或以上、OpenSSL 及下列 Python 验证依赖。

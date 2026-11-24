@@ -33,6 +33,7 @@ public final class MemoryMain {
     private final Store store;
     private final Ledger ledger;
     private final Reader reader;
+    private final Dreaming dreaming;
     private final CardCatalog catalog;
     private final CellSearch.Mode retrievalMode;
     /** 普通 /v2/ 接口使用的服务级 Bearer 凭据字节序列。 */
@@ -52,6 +53,7 @@ public final class MemoryMain {
         ledger = new Ledger(store);
         this.retrievalMode = retrievalMode;
         reader = new Reader(store, retrievalMode);
+        dreaming = new Dreaming(store);
         catalog = new CardCatalog(store, reader);
         authorization = ("Bearer " + token).getBytes(StandardCharsets.UTF_8);
         channelAuthorization =
@@ -193,7 +195,7 @@ public final class MemoryMain {
                                     "read",
                                     "recall",
                                     "cards",
-                                    "organize")
+                                    "organize", "dreaming/batch", "dreaming/commit", "dreaming/profiles", "dreaming/receipt")
                             .contains(path)) throw new Fault(404, "NOT_FOUND", "route");
             if (!exchange.getRequestMethod().equals(get ? "GET" : "POST"))
                 throw new Fault(405, "METHOD_NOT_ALLOWED", "method");
@@ -207,6 +209,7 @@ public final class MemoryMain {
                                         case "health" -> {
                                             keys(body, "");
                                             var info = store.info();
+                                            info.getAsJsonArray("capabilities").add("dreaming");
                                             // 根据本实例启用的检索模式与渠道授权配置，动态宣告可用能力集合。
                                             info.getAsJsonArray("capabilities")
                                                     .add("audience_reads");
@@ -233,6 +236,10 @@ public final class MemoryMain {
                                         case "read" -> reader.read(body);
                                         case "cards" -> catalog.cards(body);
                                         case "organize" -> catalog.organize(body);
+                                        case "dreaming/batch" -> dreaming.batch(body);
+                                        case "dreaming/commit" -> dreaming.commit(body);
+                                        case "dreaming/receipt" -> dreaming.receipt(body);
+                                        case "dreaming/profiles" -> dreaming.profiles(body);
                                         case "recall" -> reader.recall(body);
                                         default -> ledger.write(path, body);
                                     });

@@ -1212,7 +1212,7 @@
           "kind": {"enum":["person","topic"]},
           "subject": {"type":"string","minLength":1,"maxLength":128},
           "expected_version": {"type":"integer","minimum":0},
-          "text": {"type":"string","minLength":1,"maxLength":2048},
+          "text": {"type":"string","minLength":1,"maxLength":2048,"pattern":"^我"},
           "scope": {"type":"string","minLength":1,"maxLength":512},
           "reason": {"type":"string","minLength":1,"maxLength":1024},
           "source_refs": {"type":"array","items":{"$ref":"#/components/schemas/RecordRef"},"minItems":1,"maxItems":16,"uniqueItems":true}
@@ -1227,7 +1227,7 @@
           "subject": {"type":"string","minLength":1,"maxLength":128},
           "version": {"type":"integer","minimum":1},
           "author": {"const":"DREAMING"},
-          "text": {"type":"string","minLength":1,"maxLength":2048},
+          "text": {"type":"string","minLength":1,"maxLength":2048,"pattern":"^我"},
           "scope": {"type":"string","minLength":1,"maxLength":512},
           "reason": {"type":"string","minLength":1,"maxLength":1024},
           "source_refs": {"type":"array","items":{"$ref":"#/components/schemas/RecordRef"},"minItems":1,"maxItems":16,"uniqueItems":true}

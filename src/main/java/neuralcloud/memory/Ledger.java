@@ -94,6 +94,8 @@ final class Ledger {
                             store.rows("SELECT revision FROM records WHERE id=?", id).getFirst(),
                             "revision");
         }
+        // 来源编辑、撤回或授权变化与依赖它的当前档案退役同一事务，恢复授权也须重新归纳。
+        if (route.equals("corrections") || Visibility.isCommand(route)) Dreaming.invalidate(store, id);
         store.update(
                 "INSERT INTO receipts VALUES(?,?,?,?,?,?,?,?)",
                 source,
