@@ -213,6 +213,39 @@ class Dreaming(unittest.TestCase):
         self.post("commit", publication(reduced, "surviving", [surviving]))
         self.assertProfiles(surviving)
 
+    def test_rebuild_after_all_sources_were_withdrawn(self):
+        """全部撤回时旧档案隐去；新获准的同主题原文可按原版本建立下一版。"""
+        subject = "月台组曲"
+        old = self.ingest("old-room", "月台组曲在青麦厅使用单孔谱架。", topic=subject)
+        original = change("topic", subject, "月台组曲安排在青麦厅。", [old])
+        self.post("commit", publication(self.batch(STUDIO), "initial-room", [original]))
+        self.correct("cancel-old-room", old, "RETRACT")
+
+        # 同题新原文暂时只在范围外出现；消费撤回批次后，下一批没有旧原文可借用。
+        channel = dict(platform="qq", type="qq_group", account_id=ACCOUNT, sender_id=AUTHOR,
+                       conversation_id=FIELD, message_id="418")
+        new = self.ingest("new-room", "月台组曲改在枫影厅彩排。", FIELD, topic=subject, channel=channel)
+        held = self.batch(STUDIO)
+        self.assertEvidence(held)
+        for private_text in ("青麦厅", "单孔谱架", "枫影厅"):
+            self.assertNotIn(private_text, str(held))
+        self.assertProfiles()
+        self.assertGreater(held["through"], held["after"])
+        self.post("commit", publication(held, "consume-withdrawal", []))
+
+        # 这次授权属于另一条记录。仅交付新原文和旧档案身份，让调用方知道要更新哪一版。
+        self.grant("release-new-room", new, DREAM, "CITE")
+        ready = self.batch(STUDIO)
+        self.assertEvidence(ready, new)
+        self.assertEqual(ready["profiles"], [{"kind": "topic", "subject": subject, "version": 1}])
+        for withdrawn_text in ("青麦厅", "单孔谱架"):
+            self.assertNotIn(withdrawn_text, str(ready))
+        rebuilt = change("topic", subject, "月台组曲的新彩排地点是枫影厅。", [new], version=1)
+        self.post("commit", publication(ready, "mistaken-create", [{**rebuilt, "expected_version": 0}]), 409)
+        self.assertProfiles()
+        self.post("commit", publication(ready, "reopened", [rebuilt]))
+        self.assertProfiles(rebuilt)
+
     def test_author_grants_and_all_source_audience(self):
         """正例原作者可授权范围外的原文；反例 READ、部分 CITE、撤销任一必要授权均隐藏。"""
         channel = dict(platform="qq", type="qq_group", account_id=ACCOUNT, sender_id=AUTHOR,
