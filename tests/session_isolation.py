@@ -21,9 +21,15 @@ def group_message(key, content, privacy):
                  source_venue="合成评审群", privacy=privacy)
 
 
-def read(run, audience, *targets, **fields):
-    """用同一个受众一次核对多条记录及其指定修订。"""
-    return run.api("read", dict(context=audience, kind="HISTORY", targets=list(targets), **fields))["items"]
+def identity_event(key, account, name, privacy):
+    """确认备注与称呼取不同的合成文本，以便检验两种读取目的的输出。"""
+    return event(key, "测试用核验备注 " + key, context=context(QQ_GROUP, "ORCHESTRATOR"), privacy=privacy,
+                 identity=dict(account_id=account, name=name))
+
+
+def read(run, audience, *targets, kind="HISTORY", **fields):
+    """按原读取目的和本次受众一次核对多条记录及其指定修订。"""
+    return run.api("read", dict(context=audience, kind=kind, targets=list(targets), **fields))["items"]
 
 
 def organize(run):
@@ -65,21 +71,40 @@ class SessionIsolation(unittest.TestCase):
             else:
                 self.assertEqual(item["citation_scope"], citation_scope)
 
-    def test_default_shares_ordinary_channel_records(self):
-        """正例。未配置开关，两个没有来源授权的受众可查阅 QQ 群及移动私聊原文。"""
+    def assert_identities(self, items, expected, audience):
+        """逐个账号核对已确认称呼、确认修订和原请求受众，正文不能混入核验备注。"""
+        self.assertCountEqual([(item["ref"], item["identity_account_id"], item["text"]) for item in items], expected)
+        for item in items:
+            self.assertEqual([ref(source) for source in item["source_refs"]], [item["ref"]])
+            self.assertEqual(item["citation_scope"], audience["conversation_id"])
+            self.assertIs(item["grant_dependent"], True)
+
+    def test_default_shares_all_privacy_levels(self):
+        """正例。三种隐私等级均能通过原会话及跨渠道读取，QQ 本人历史仍只交付本人发言。"""
         run = self.service()
         health = run.memory()
         group = group_message("group-observation", "银杏样册使用蓝色封面。", "public")
         mobile = event("mobile-observation", "银杏样册附有勘误页。", context=MOBILE_PRIVATE, topic=TOPIC,
                        speaker="小秋", source_venue="合成移动私聊", privacy="private")
-        originals = [(ref(run.api("ingest", source)), source) for source in (group, mobile)]
+        peer = QQ_PRIVATE["qq"]
+        private_channel = dict(platform="qq", type="qq_private", account_id=peer["account_id"], sender_id=peer["peer_id"],
+                               conversation_id=QQ_PRIVATE["conversation_id"], message_id="synthetic-private")
+        sensitive = event("private-observation", "银杏样册还有合成的批注。", topic=TOPIC, privacy="sensitive",
+                          context=dict(QQ_PRIVATE, actor_id="ROUTER", role="ROUTER"), channel=private_channel,
+                          speaker="合成发言人", source_venue="合成 QQ 私聊")
+        originals = [(ref(run.api("ingest", source)), source) for source in (group, mobile, sensitive)]
         records = [record for record, _ in originals]
 
-        # 私聊使用可引用召回，移动群按 ID 读取原文，两份数据都来自其他会话。
+        # QQ 私聊在原会话引用自己的敏感原话。移动群以另一受众的身份回读这三份证据。
         hits = run.api("recall", query(TOPIC, context=QQ_PRIVATE, use="CITE"))["items"]
         self.assert_sources(hits, originals, QQ_PRIVATE["conversation_id"])
         self.assertIs(health.get("session_isolation"), False)
         self.assert_sources(read(run, MOBILE_GROUP, *records, use="READ"), originals, None)
+        own = query(TOPIC, context=QQ_PRIVATE, kind="SELF_HISTORY", before="2099-01-01T00:00:00Z")
+        self.assertEqual([item["ref"] for item in run.api("recall", own)["items"]], [records[2]])
+        personal, third_party = read(run, QQ_PRIVATE, records[2], records[0], kind="SELF_HISTORY")
+        self.assertEqual((personal["ref"], personal["text"]), (records[2], sensitive["content"]))
+        self.assertEqual(third_party, dict(record_id=records[0]["record_id"], status="NOT_FOUND"))
 
         organize(run)
         directory = run.api("cards", dict(context=MOBILE_GROUP, view="L0", axis="SUBJECT", limit=16))["items"]
@@ -122,41 +147,124 @@ class SessionIsolation(unittest.TestCase):
 
         shared = self.service("false", initial.ledger, token)
         self.assertIs(shared.memory().get("session_isolation"), False)
-        visible, restricted, replaced, withdrawn, invalid = read(shared, QQ_PRIVATE, current, secret, first, removed, old_reply)
+        visible, sensitive, replaced, withdrawn, invalid = read(shared, QQ_PRIVATE, current, secret, first, removed, old_reply)
         self.assertEqual((visible["ref"], visible["text"], visible["citation_scope"]),
                          (current, "银杏样册改用新编号。", QQ_PRIVATE["conversation_id"]))
-        self.assertEqual(restricted, dict(record_id=secret["record_id"], status="NOT_FOUND"))
+        self.assertEqual(sensitive["status"], "ONLINE", sensitive)
+        self.assertEqual((sensitive["ref"], sensitive["text"], sensitive["citation_scope"]),
+                         (secret, "银杏样册附有限阅清单。", QQ_PRIVATE["conversation_id"]))
         for item, target in ((replaced, first), (withdrawn, removed), (invalid, old_reply)):
             self.assertNotIn("text", item)
             self.assertEqual(item["record_id"] if item["status"] == "NOT_FOUND" else item["ref"]["record_id"],
                              target["record_id"])
         hits = shared.api("recall", query(TOPIC, context=QQ_PRIVATE))["items"]
-        self.assertEqual([item["ref"] for item in hits], [current])
+        self.assertCountEqual([item["ref"] for item in hits], [current, secret])
         details = dict(context=QQ_PRIVATE, view="L1", axis="SUBJECT", title=TOPIC, limit=16)
         cards = shared.api("cards", details)["items"]
-        self.assertEqual([item["ref"] for row in cards for item in row["items"]], [current])
+        self.assertCountEqual([item["ref"] for row in cards for item in row["items"]], [current, secret])
 
         own = query(TOPIC, context=QQ_PRIVATE, kind="SELF_HISTORY", before="2099-01-01T00:00:00Z")
         self.assertEqual(shared.api("recall", own)["items"], [])
-        denied = event("denied", "样册摘要", kind="summary", context=QQ_PRIVATE, author="MASTER", source_refs=[current])
+        denied = event("denied", "样册摘要", kind="summary", context=QQ_PRIVATE, author="MASTER", source_refs=[secret])
         self.assertEqual(shared.api("candidates", denied, 403)["code"], "FORBIDDEN")
         # 回复保留精确的外会话来源，回切时也必须按当前受众重新核对。
         reply = ref(shared.api("ingest", event("reply", "我已收到新编号。", kind="self_expression",
                         context=dict(QQ_PRIVATE, actor_id="ROUTER", role="ROUTER"), source_refs=[current])))
         delivered, = read(shared, QQ_PRIVATE, reply, use="CITE")
         self.assertEqual((delivered["ref"], delivered["source_refs"]), (reply, [current]))
+        # 在公开写入口由 Router 交付 Master 摘要。其敏感来源须随摘要一起复核。
+        summary = ref(shared.api("candidates", dict(denied, event_id="summary",
+                               context=dict(QQ_PRIVATE, actor_id="ROUTER", role="ROUTER"))))
+        delivered, = read(shared, QQ_PRIVATE, summary, use="CITE")
+        self.assertEqual((delivered["ref"], delivered["source_refs"]), (summary, [secret]))
         close_memory(shared)
 
         restored = self.service("true", shared.ledger, token)
         self.assertIs(restored.memory().get("session_isolation"), True)
-        self.assertEqual(read(restored, QQ_PRIVATE, current, reply, use="CITE"),
-                         [dict(record_id=record["record_id"], status="NOT_FOUND") for record in (current, reply)])
+        hidden = [current, reply, secret, summary]
+        self.assertEqual(read(restored, QQ_PRIVATE, *hidden, use="CITE"),
+                         [dict(record_id=record["record_id"], status="NOT_FOUND") for record in hidden])
         self.assertEqual(restored.api("recall", query(TOPIC, context=QQ_PRIVATE, use="CITE"))["items"], [])
         self.assertEqual(restored.api("cards", details)["items"], [])
         authorized, = read(restored, MOBILE_GROUP, current, use="CITE")
         self.assertEqual((authorized["ref"], authorized["citation_scope"]), (current, MOBILE_GROUP["conversation_id"]))
-        print("隔离回切", dict(ungranted=[current, reply], still_granted=current, sensitive=secret,
+        print("隔离回切", dict(ungranted=hidden, still_granted=current, sensitive=secret,
                            replaced=first, withdrawn=removed, invalid=old_reply), flush=True)
+
+    def test_confirmed_identity_directory(self):
+        """正例。群及私聊按已确认账号、完整称呼或记录 ID 取证，多个账号可以各有自己的称呼。"""
+        run = self.service("false")
+        health = run.memory()
+        first_account = QQ_PRIVATE["qq"]["peer_id"]
+        other_account = QQ_AUTHOR["qq"]["peer_id"]
+        first_name, other_name = "合成纸鸢甲", "合成蓝页乙"
+        first = ref(run.api("ingest", identity_event("identity-first", first_account, first_name, "sensitive")))
+        other = ref(run.api("ingest", identity_event("identity-other", other_account, other_name, "private")))
+        both = [(first, first_account, first_name), (other, other_account, other_name)]
+
+        # 公开接口能力随服务版本发布。目录可列举不同账号，也可由别的渠道逐个精确查找。
+        self.assertIn("identity_lookup", health["capabilities"])
+        listed = run.api("recall", query("", context=MOBILE_GROUP, kind="IDENTITY"))
+        self.assert_identities(listed["items"], both, MOBILE_GROUP)
+        self.assertNotEqual(listed["assessment"]["state"], "CONFLICT")
+        self.assertIs(listed["assessment"]["sufficient"], True)
+        for term, expected in ((other_account, both[1:]), (first_name, both[:1]), ("纸鸢", [])):
+            matched = run.api("recall", query(term, context=QQ_PRIVATE, kind="IDENTITY"))
+            self.assert_identities(matched["items"], expected, QQ_PRIVATE)
+        self.assert_identities(read(run, MOBILE_GROUP, first, other, kind="IDENTITY"), both, MOBILE_GROUP)
+        own = run.api("recall", query("", context=QQ_PRIVATE, kind="SELF_IDENTITY"))["items"]
+        self.assertEqual([(item["ref"], item["text"]) for item in own], [(first, first_name)])
+        print("已确认的合成账号及来源", both, flush=True)
+
+    def test_identity_confirmation_conflict_and_restore(self):
+        """反例。冒名确认、无确认来源、称呼冲突和回切后的目录引用都不能成为确定身份。"""
+        shared = self.service("false")
+        shared.memory()
+        account = QQ_PRIVATE["qq"]["peer_id"]
+        initial = identity_event("identity-live", account, "合成青瓷", "public")
+        alternate = identity_event("identity-alternate", account, "合成红笺", "private")
+        denied = dict(initial, event_id="identity-denied", context=context(QQ_GROUP, "ROUTER"))
+        self.assertEqual(shared.api("ingest", denied, 403)["code"], "FORBIDDEN")
+        declared = ref(shared.api("ingest", group_message("identity-unconfirmed", "随口自称合成青瓷。", "public")))
+        live = ref(shared.api("ingest", initial))
+        conflict = ref(shared.api("ingest", alternate))
+        lookup = query(account, context=MOBILE_GROUP, kind="IDENTITY", limit=1)
+        # 按账号或按称呼查找时，都须在截取第一条之前检查这个账号的矛盾确认。
+        for term in (account, "合成青瓷"):
+            self.assertEqual(shared.api("recall", dict(lookup, query=term))["assessment"],
+                             dict(state="CONFLICT", sufficient=False, absence_confirmed=False))
+        shared.api("corrections", dict(context=context(QQ_GROUP, "ORCHESTRATOR"), source_instance="neuralcloud-java",
+                                       event_id="identity-retract", reason="撤销合成的冲突确认", operation="RETRACT",
+                                       record_id=conflict["record_id"], expected_revision=conflict["revision"]))
+        self.assert_identities(shared.api("recall", lookup)["items"], [(live, account, "合成青瓷")], MOBILE_GROUP)
+        unconfirmed, withdrawn = read(shared, MOBILE_GROUP, declared, conflict, kind="IDENTITY")
+        for item, source in ((unconfirmed, declared), (withdrawn, conflict)):
+            self.assertNotIn("text", item)
+            self.assertEqual(item["record_id"] if item["status"] == "NOT_FOUND" else item["ref"]["record_id"],
+                             source["record_id"])
+        wrong_character = dict(MOBILE_GROUP, character_id="synthetic-other-character")
+        self.assertEqual(shared.api("recall", dict(lookup, context=wrong_character), 403)["code"], "FORBIDDEN")
+
+        # 在确认来源自己的会话里发表身份引用，再派生一层，确保回切测试只改变目的权限。
+        group = context(QQ_GROUP, "CHAT_WORKER")
+        echo = ref(shared.api("ingest", event("identity-echo", "本次目录给出合成青瓷。", scope=QQ_GROUP,
+                   kind="self_expression", source_refs=[dict(live, purpose="IDENTITY")])))
+        summary = ref(shared.api("candidates", event("identity-summary", "摘要采用该称呼。", scope=QQ_GROUP,
+                      kind="summary", author="MASTER", source_refs=[echo])))
+        self.assertEqual([item["ref"] for item in read(shared, group, echo, summary, use="CITE")], [echo, summary])
+        close_memory(shared)
+
+        isolated = self.service("true", shared.ledger)
+        self.assertIn("identity_lookup", isolated.memory()["capabilities"])
+        self.assertEqual(isolated.api("recall", query("", context=QQ_PRIVATE, kind="IDENTITY"))["items"], [])
+        self.assertEqual(read(isolated, QQ_PRIVATE, live, kind="IDENTITY"),
+                         [dict(record_id=live["record_id"], status="NOT_FOUND")])
+        own = isolated.api("recall", query("", context=QQ_PRIVATE, kind="SELF_IDENTITY"))["items"]
+        self.assertEqual([(item["ref"], item["text"]) for item in own], [(live, "合成青瓷")])
+        ordinary, *hidden = read(isolated, group, live, echo, summary, use="CITE")
+        self.assertEqual((ordinary["ref"], ordinary["text"]), (live, initial["content"]))
+        self.assertEqual(hidden, [dict(record_id=record["record_id"], status="NOT_FOUND") for record in (echo, summary)])
+        print("身份回切及来源复核", dict(live=live, withdrawn=conflict, hidden=[echo, summary]), flush=True)
 
 
 if __name__ == "__main__":
