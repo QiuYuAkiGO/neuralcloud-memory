@@ -18,7 +18,7 @@ import java.util.*;
  * <ul>
  *   <li>通过目录内 {@code memory.lock} 文件排他锁确保同一角色主体目录同一时刻仅有一个写进程，避免并发破坏恢复边界。</li>
  *   <li>启用 WAL、{@code synchronous=FULL} 与外键约束，保证持久回执与事务原子落盘。</li>
- *   <li>启动事务内执行空库建表或 v2 → v3 → v4 原地模式迁移、核对 {@code character_id} 身份并验证 FTS5 可用性，全部通过后才提交并对外开放服务。</li>
+ *   <li>启动事务内执行空库建表或 v2 至 v5 原地模式迁移、核对 {@code character_id} 身份并验证 FTS5 可用性，全部通过后才提交并对外开放服务。</li>
  *   <li>通过 {@link #transaction(Work)} 串行化单次请求，保证读取水位（{@code read_seq}）与返回数据来自同一权威快照。</li>
  * </ul>
  */
@@ -66,7 +66,7 @@ final class Store implements AutoCloseable {
                         .isEmpty()) throw new IOException("unrecognized existing database");
                 schema("/schema.sql");
                 update("INSERT INTO meta VALUES(?,?)", character, UUID.randomUUID().toString());
-            } else if (version < 2 || version > 4)
+            } else if (version < 2 || version > 5)
                 throw new IOException("unsupported schema version " + version);
             // 旧库原地增加授权索引（v2 -> v3），保留原有流标识、版本与消费水位。
             if (version < 3) schema("/visibility.sql");
@@ -95,6 +95,8 @@ final class Store implements AutoCloseable {
                         CellSearch.index(this, records.getString(1), parse(records.getString(2)));
                 }
             }
+            // v4 -> v5 增加独立档案、覆盖水位与回执，不改写旧 Master 印象或原始流。
+            if (version < 5) schema("/dreaming.sql");
             var metadata = rows("SELECT * FROM meta").getFirst();
             // 校验目录归属的角色主体，防止错配配置把 A 角色的数据挂到 B 角色进程。
             if (!character.equals(get(metadata, "character_id")))
