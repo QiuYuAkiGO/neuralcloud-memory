@@ -1209,7 +1209,7 @@
       "DreamChange": {
         "type": "object",
         "additionalProperties": false,
-        "description":"本批 QQ 人物认识须带已签发的 person_id。群历史修订至少引用一条本页成员原话，更新同一人的现行档案时还可保留该档已签发且仍获准的精确引用。名称与内容依据分别复核。",
+        "description":"本批 QQ 人物认识须带已签发的 person_id。群历史修订至少引用一条本页成员原话。引用本人本页发言续写同一人的现行档案时，可保留该档已签发且仍获准的精确引用。名称与内容依据分别复核。",
         "if":{"properties":{"kind":{"const":"topic"}}},"then":{"not":{"required":["person_id"]}},
         "properties": {
           "kind": {"enum":["person","topic"]},

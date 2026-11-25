@@ -434,7 +434,7 @@ AND g.target=? AND g.use='CITE' AND g.status='ACTIVE')) END
                     retained.addAll(profile.getAsJsonArray("source_refs"));
             }
         var sources = retained.isEmpty() ? offered : new HashMap<>(offered);
-        boolean hasPageSource = false;
+        boolean hasPageSource = false, hasOwnPageSource = false, keepsPriorSource = false;
         for (var entry : refs) {
             if (!(entry instanceof JsonObject r)) throw invalid("source_refs");
             keys(r, "record_id revision");
@@ -442,11 +442,14 @@ AND g.target=? AND g.use='CITE' AND g.status='ACTIVE')) END
             long revision = number(r, "revision", 1, Long.MAX_VALUE);
             if (!seen.add(id)) throw invalid("source_refs.record_id");
             var e = offered.get(id);
-            if (e != null) hasPageSource = true;
-            else if (retained.contains(r)) {
+            if (e != null) {
+                hasPageSource = true;
+                if (signed && change.get("person_id").equals(e.get("speaker_person_id"))) hasOwnPageSource = true;
+            } else if (retained.contains(r)) {
                 // 只能承接本页所发同一人物现版中的精确引用。旧原文留在 Memory，提交时重新验权、验修订。
                 e = evidence(id);
                 if (e != null) sources.put(id, e);
+                keepsPriorSource = true;
             }
             if (e == null || num(e, "revision") != revision) throw conflict("SOURCE_CHANGED");
             if (!signed && person != null && e.has("speaker_person_id")) throw invalid("changes.person_id");
@@ -463,8 +466,9 @@ AND g.target=? AND g.use='CITE' AND g.status='ACTIVE')) END
                             people.inheritDependencies(part, deps);
             }
         }
-        if (historicalProfiles != null && !hasPageSource)
-            throw invalid("changes.source_refs 至少需要一条本页的群成员原话");
+        // 群友的明确见证可支持新判断。沿用未进入本页的旧档引用，则须有档案本人本页的发言。
+        if (historicalProfiles != null && (!hasPageSource || keepsPriorSource && !hasOwnPageSource))
+            throw invalid("changes.source_refs 须引用本页群成员原话，保留旧档引用时须有本人的本页发言");
         if (signed) {
             String main = names.primary(person, null);
             var issued = persons.get(person);
