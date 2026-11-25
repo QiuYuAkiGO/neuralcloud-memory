@@ -49,6 +49,15 @@ final class DreamNameStatements {
         return raw.startsWith("{") || raw.startsWith("[") || raw.startsWith(">") || THIRD_PERSON.matcher(raw).find();
     }
 
+    /** 旧档只有 QQ 可作独立归属时，要求清楚的本人叙述，排除他人的原话及主语不明的转述。 */
+    static boolean directSelfReport(String content) {
+        String raw = content.stripLeading();
+        return raw.startsWith("我") && !describesAnother(raw) && !INDIRECT.matcher(raw).find()
+                && !DISAVOWED.matcher(raw).find()
+                && !raw.matches("(?s).*(?:[“‘「『\"]\\s*我|别人|对方|[？?]).*")
+                && !raw.matches("(?s)^我(?:觉得|认为|听说|听到|看见|看到|发现).+");
+    }
+
     static boolean locallyScoped(String content) { return LOCAL.matcher(content).find(); }
 
     /** 中文称呼不依赖空格分词。仅把有称谓边界、明确语法位置的提及用于有归属后果的桥接。 */

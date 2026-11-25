@@ -1208,8 +1208,11 @@
       "DreamChange": {
         "type": "object",
         "additionalProperties": false,
+        "description":"本批 QQ 人物认识须带已签发的 person_id。名称与内容依据分别复核。",
+        "if":{"properties":{"kind":{"const":"topic"}}},"then":{"not":{"required":["person_id"]}},
         "properties": {
           "kind": {"enum":["person","topic"]},
+          "person_id": {"$ref":"#/components/schemas/DreamPersonId"},
           "subject": {"type":"string","minLength":1,"maxLength":128},
           "expected_version": {"type":"integer","minimum":0},
           "text": {"type":"string","minLength":1,"maxLength":2048,"pattern":"^我"},
@@ -1222,8 +1225,10 @@
       "DreamProfile": {
         "type": "object",
         "additionalProperties": false,
+        "if":{"properties":{"kind":{"const":"topic"}}},"then":{"not":{"required":["person_id"]}},
         "properties": {
           "kind": {"enum":["person","topic"]},
+          "person_id": {"$ref":"#/components/schemas/DreamPersonId"},
           "subject": {"type":"string","minLength":1,"maxLength":128},
           "version": {"type":"integer","minimum":1},
           "author": {"const":"DREAMING"},
@@ -1237,12 +1242,38 @@
       "DreamIdentity": {
         "type": "object",
         "additionalProperties": false,
+        "if":{"properties":{"kind":{"const":"topic"}}},"then":{"not":{"required":["person_id"]}},
         "properties": {
           "kind": {"enum":["person","topic"]},
+          "person_id": {"$ref":"#/components/schemas/DreamPersonId"},
           "subject": {"type":"string","minLength":1,"maxLength":128},
           "version": {"type":"integer","minimum":1}
         },
         "required": ["kind","subject","version"]
+      },
+      "DreamPersonId": {"type":"string","minLength":1,"maxLength":128,"description":"本角色库内与称呼独立的稳定人物标识"},
+      "DreamPerson": {
+        "type":"object","additionalProperties":false,"required":["person_id","identity_version","aliases"],
+        "properties":{
+          "person_id":{"$ref":"#/components/schemas/DreamPersonId"},
+          "identity_version":{"type":"integer","minimum":0},
+          "subject":{"type":"string","minLength":1,"maxLength":128},
+          "aliases":{"type":"array","uniqueItems":true,"items":{"type":"string","minLength":1,"maxLength":128}}
+        }
+      },
+      "DreamNameClaim": {
+        "type":"object","additionalProperties":false,"required":["person_id","expected_identity_version","name","relation","scope","source_refs"],
+        "properties":{
+          "person_id":{"$ref":"#/components/schemas/DreamPersonId"},
+          "expected_identity_version":{"type":"integer","minimum":0},
+          "name":{"type":"string","minLength":1,"maxLength":128},
+          "relation":{"enum":["SELF_NAME","PREFERRED_NAME","DIRECT_CONFIRMATION","MENTION"]},
+          "scope":{"type":"string","minLength":1,"maxLength":256,"description":"global 或原始会话标识"},
+          "source_refs":{"type":"array","minItems":1,"maxItems":16,"items":{
+            "type":"object","additionalProperties":false,"required":["record_id","revision","quote"],
+            "properties":{"record_id":{"type":"string","pattern":"^[0-9a-f]{64}$"},"revision":{"type":"integer","minimum":1},"quote":{"type":"string","minLength":1,"maxLength":2048}}
+          }}
+        }
       },
       "DreamEvidence": {
         "type": "object",
@@ -1258,6 +1289,14 @@
           "topic": {"type":"string","minLength":1,"maxLength":128},
           "source_venue": {"type":"string","minLength":1,"maxLength":256},
           "sender_id": {"type":"string","minLength":1,"maxLength":128},
+          "speaker_person_id":{"$ref":"#/components/schemas/DreamPersonId"},
+          "message_id":{"type":"string","minLength":1,"maxLength":128},
+          "nickname":{"type":"string","minLength":1,"maxLength":128},
+          "card":{"type":"string","minLength":1,"maxLength":128},
+          "mention_ids":{"$ref":"#/components/schemas/QqMentions"},
+          "reply_message_id":{"type":"string","minLength":1,"maxLength":128},
+          "reviewed_person_id":{"$ref":"#/components/schemas/DreamPersonId"},
+          "reviewed_name":{"type":"string","minLength":1,"maxLength":128},
           "speaker_subject": {"type":"string","minLength":1,"maxLength":128,"description":"由角色本人或 QQ 发件人绑定确认的发言者主称呼"}
         },
         "required": ["record_id","revision","conversation_id","kind","content","occurred_at"]
@@ -1270,6 +1309,8 @@
           "policy_version": {"type":"integer","minimum":1},
           "after": {"type":"integer","minimum":0},
           "through": {"type":"integer","minimum":0},
+          "lane":{"const":"identity_backfill"},
+          "persons":{"type":"array","items":{"$ref":"#/components/schemas/DreamPerson"}},
           "evidence": {"type":"array","items":{"$ref":"#/components/schemas/DreamEvidence"},"minItems":0},
           "profiles": {"type":"array","items":{"oneOf":[{"$ref":"#/components/schemas/DreamProfile"},{"$ref":"#/components/schemas/DreamIdentity"}]},"minItems":0},
           "person_names": {"type":"array","description":"本批相关的已确认人物称呼","items":{"type":"object","additionalProperties":false,"required":["subject","aliases"],"properties":{"subject":{"type":"string","minLength":1,"maxLength":128},"aliases":{"type":"array","uniqueItems":true,"items":{"type":"string","minLength":1,"maxLength":128}}}}}
@@ -1287,6 +1328,8 @@
           "policy_version": {"type":"integer","minimum":1},
           "after": {"type":"integer","minimum":0},
           "through": {"type":"integer","minimum":0},
+          "lane":{"const":"identity_backfill"},
+          "name_claims":{"type":"array","minItems":0,"maxItems":16,"items":{"$ref":"#/components/schemas/DreamNameClaim"}},
           "changes": {"type":"array","items":{"$ref":"#/components/schemas/DreamChange"},"minItems":0,"maxItems":8}
         },
         "required": ["context","source_instance","event_id","stream_id","policy_version","after","through","changes"]
@@ -1322,6 +1365,7 @@
         "additionalProperties": false,
         "properties": {
           "status": {"const":"DURABLE"},
+          "lane":{"const":"identity_backfill"},
           "event_id": {"type":"string","minLength":1,"maxLength":256},
           "stream_id": {"type":"string","format":"uuid"},
           "policy_version": {"type":"integer","minimum":1},
@@ -1507,6 +1551,7 @@
           "effective_at"
         ]
       },
+      "QqMentions":{"type":"array","minItems":1,"maxItems":64,"uniqueItems":true,"items":{"type":"string","pattern":"^[1-9][0-9]{4,15}$"}},
       "Channel": {
         "oneOf": [
           {
@@ -1540,12 +1585,20 @@
                 "minLength": 1,
                 "maxLength": 128
               },
+              "nickname":{"type":"string","minLength":1,"maxLength":128},
+              "card":{"type":"string","minLength":1,"maxLength":128},
+              "mention_ids":{"$ref":"#/components/schemas/QqMentions"},
+              "reply_message_id":{"type":"string","minLength":1,"maxLength":128},
               "conversation_id": {
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 256
               }
             },
+            "allOf":[
+              {"if":{"properties":{"type":{"const":"qq_private"}}},"then":{"not":{"required":["card"]}}},
+              {"if":{"properties":{"type":{"const":"qq_group_notice"}}},"then":{"not":{"anyOf":[{"required":["nickname"]},{"required":["card"]},{"required":["mention_ids"]},{"required":["reply_message_id"]}]}}}
+            ],
             "required": [
               "platform",
               "type",

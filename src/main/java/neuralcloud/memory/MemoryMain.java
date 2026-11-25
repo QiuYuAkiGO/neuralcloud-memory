@@ -222,6 +222,7 @@ public final class MemoryMain {
                                             keys(body, "");
                                             var info = store.info();
                                             info.getAsJsonArray("capabilities").add("dreaming");
+                                            info.getAsJsonArray("capabilities").add("dreaming_qq_aliases");
                                             // 根据本实例启用的检索模式与渠道授权配置，动态宣告可用能力集合。
                                             info.getAsJsonArray("capabilities")
                                                     .add("audience_reads");

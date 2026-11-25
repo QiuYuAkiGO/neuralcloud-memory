@@ -26,11 +26,11 @@ final class DreamIdentities {
     }
 
     /** 账号和角色身份从首次签发起就有稳定 ID。维护者后续为同一账号登记称呼时复用原 ID。 */
-    private String bind(List<String> keys) throws SQLException {
+    private static String bind(Store store, List<String> keys) throws SQLException {
         var matches = store.rows("SELECT person_id,count(*) n FROM dream_identity_keys WHERE identity_key IN"
                 + " (SELECT value FROM json_each(?)) GROUP BY person_id", JSON.toJson(keys));
         if (matches.size() > 1) throw invalid("dreamingPeopleFile 已有不同人物的身份键");
-        String pid = matches.isEmpty() ? recordId(home, keys.getFirst()) : get(matches.getFirst(), "person_id");
+        String pid = matches.isEmpty() ? recordId("dreaming:" + store.character, keys.getFirst()) : get(matches.getFirst(), "person_id");
         if (!matches.isEmpty() && num(matches.getFirst(), "n") == keys.size()) return pid;
         store.update("INSERT OR IGNORE INTO dream_identities(person_id) VALUES(?)", pid);
         for (String key : keys)
@@ -40,6 +40,11 @@ final class DreamIdentities {
 
     /** 人工登记保留独立来源，不能被模型声明覆盖。旧表仍是人工配置的权威。 */
     String manualId(String name) throws SQLException {
+        return manualId(store, name);
+    }
+
+    /** 启动事务也用同一组键校验已存在的独立身份，冲突会使整份新配置一起回滚。 */
+    static String manualId(Store store, String name) throws SQLException {
         var rows = store.rows("SELECT root.* FROM dream_person_names n JOIN dream_person_names root ON"
                 + " root.name=n.subject WHERE n.name=?", name);
         if (rows.isEmpty()) return null;
@@ -48,17 +53,17 @@ final class DreamIdentities {
         if (num(row, "is_self") == 1) keys.add("self");
         if (!row.get("qq_sender_id").isJsonNull()) keys.add("qq:" + get(row, "qq_sender_id"));
         keys.add("manual:" + get(row, "subject"));
-        return bind(keys);
+        return bind(store, keys);
     }
 
     private String qq(String sender) throws SQLException {
         var assigned = store.rows("SELECT subject FROM dream_person_names WHERE qq_sender_id=?", sender);
-        return assigned.isEmpty() ? bind(List.of("qq:" + sender)) : manualId(get(assigned.getFirst(), "subject"));
+        return assigned.isEmpty() ? bind(store, List.of("qq:" + sender)) : manualId(get(assigned.getFirst(), "subject"));
     }
 
     private String self() throws SQLException {
         var named = store.rows("SELECT subject FROM dream_person_names WHERE is_self=1");
-        return named.isEmpty() ? bind(List.of("self")) : manualId(get(named.getFirst(), "subject"));
+        return named.isEmpty() ? bind(store, List.of("self")) : manualId(get(named.getFirst(), "subject"));
     }
 
     boolean known(String pid) throws SQLException {
