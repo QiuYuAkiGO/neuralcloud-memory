@@ -445,16 +445,25 @@ ORDER BY v.seq DESC""",
         keys(
                 req,
                 "context kind query profile limit use subject_id predicate action_id as_of_valid"
-                        + " as_of_known_seq before");
+                        + " as_of_known_seq before qq_sender_id");
         var ctx = Access.from(store, req);
         String purpose = one(req, "kind", "HISTORY", "SELF_HISTORY", "SELF_IDENTITY", "IDENTITY");
         String use = use(req, purpose);
         one(req, "profile", "QUICK", "THINKING");
         String query = str(req, "query", 256);
+        // 发言者条件只缩小当前私聊受众的 CITE 范围。它不能替换受众，也不能转入事项时间线。
+        boolean bySender = req.has("qq_sender_id");
+        if (bySender) {
+            if (!purpose.equals("HISTORY") || !use.equals("CITE") || !req.has("before")
+                    || req.has("subject_id") || req.has("predicate") || req.has("action_id"))
+                throw invalid("qq_sender_id");
+            ctx.requireQq();
+            Access.qqId(req, "qq_sender_id");
+        }
         boolean validQuery = switch (purpose) {
             case "SELF_IDENTITY" -> query.isEmpty();
             case "IDENTITY" -> query.isEmpty() || !query.isBlank();
-            default -> !query.isBlank();
+            default -> !query.isBlank() || bySender && query.isEmpty();
         };
         if (!validQuery) throw invalid("query");
         int limit = (int) number(req, "limit", 1, purpose.equals("SELF_HISTORY") ? 16 : 50);
@@ -490,6 +499,7 @@ ORDER BY v.seq DESC""",
         var identities = new HashSet<String>();
         for (var row : rows) {
             JsonObject result = item(ctx, row, purpose, use, 0, 2048, "L1", at);
+            if (bySender) result.addProperty("speaker", "QQ 账号 " + get(req, "qq_sender_id"));
             if (purpose.equals("SELF_IDENTITY")) identities.add(get(result, "text"));
             if (result.has("assertion")) {
                 var a = object(result, "assertion");
@@ -599,6 +609,14 @@ ORDER BY v.seq DESC""",
                         + allowed(ctx, purpose, use(req, purpose), args)
                         + " AND r.status='ONLINE' AND v.occurred<?";
         args.add(before);
+        if (req.has("qq_sender_id")) {
+            // 同一候选条件用于词法种子和回复链邻居，避免邻接的其他作者被当作此人的发言。
+            where += " AND r.kind='observation' AND json_extract(v.body,'$.channel.type')"
+                    + " IN ('qq_private','qq_group','qq_group_notice')"
+                    + " AND json_extract(v.body,'$.channel.account_id')=? AND json_extract(v.body,'$.channel.sender_id')=?";
+            args.add(ctx.account());
+            args.add(get(req, "qq_sender_id"));
+        }
         if (req.has("action_id")) {
             where += " AND json_extract(v.body,'$.action_id')=?";
             args.add(text(req, "action_id", 256));
@@ -637,6 +655,11 @@ AND (json_type(v.body,'$.source_refs') IS NULL OR NOT EXISTS (
                                 + " v.occurred<? AND r.status='ONLINE' AND "
                                 + readable
                                 + ")))";
+            }
+            // 只问人物时直接在已授权的作者原话内按发生时间取数，原话无须包含自己的名字。
+            if (req.has("qq_sender_id") && query.isEmpty()) {
+                args.add(limit);
+                return store.rows(from + where + " ORDER BY v.occurred DESC,v.seq DESC LIMIT ?", args.toArray());
             }
             if (expanded) {
                 return new CellSearch(store)

@@ -2095,6 +2095,11 @@
             "minimum": 1,
             "maximum": 50
           },
+          "qq_sender_id": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]{4,15}$",
+            "description": "QQ 私聊原发言账号筛选。受众取 context.qq.peer_id，空 query 按发生时间从新到旧返回。"
+          },
           "subject_id": {
             "type": "string",
             "minLength": 1,
@@ -2139,8 +2144,16 @@
           "profile",
           "limit"
         ],
-        "description": "IDENTITY 的 query 是 QQ 账号、完整确认称呼或用于列举的空串，结果携带 identity_account_id，按账号核对冲突。SELF_IDENTITY 的 query 为空，绑定入站身份。SELF_HISTORY 绑定入站 QQ 私聊、before 与 1–16 的 limit。before 为排他的发言时间上界。",
+        "description": "IDENTITY 的 query 是 QQ 账号、完整确认称呼或用于列举的空串，结果携带 identity_account_id，按账号核对冲突。SELF_IDENTITY 的 query 为空，绑定入站身份。SELF_HISTORY 绑定入站 QQ 私聊、before 与 1–16 的 limit。before 为排他的发言时间上界。qq_author_history 能力支持按原作者召回。",
         "allOf": [
+          {
+            "if": {"required": ["qq_sender_id"]},
+            "then": {
+              "required": ["use", "before"],
+              "properties": {"kind": {"const": "HISTORY"}, "use": {"const": "CITE"}, "context": {"required": ["qq"]}},
+              "not": {"anyOf": [{"required":["subject_id"]},{"required":["predicate"]},{"required":["action_id"]}]}
+            }
+          },
           {
             "if": {
               "required": [
