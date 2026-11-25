@@ -50,7 +50,12 @@ final class DreamGroupHistory {
 
     /** 带附件的文字仍是原话。只有整段都是已知媒体占位或空白时才跳过。 */
     private static boolean hasWords(String text) {
-        return !MEDIA.matcher(text).replaceAll("").isBlank();
+        return !textForAttribution(text).isBlank();
+    }
+
+    /** 归属判断读取发言的文字部分。签发给模型和核验引用时，仍逐字使用账本原文。 */
+    static String textForAttribution(String text) {
+        return MEDIA.matcher(text).replaceAll("");
     }
 
     /** 原生 channel 在 Ledger 或正式 v1 导入边界已核实。保留机器人账号供跨来源去重，不填补旧协议缺失的账号。 */
@@ -210,9 +215,12 @@ final class DreamGroupHistory {
         return true;
     }
 
-    /** 资料可作一条称呼的依据，不能作为群聊正文发给模型。 */
+    /** 资料的性质由原档修订决定。即使它失去配对或原会话被单独授权，也不能变成成员发言。 */
     static boolean nameRecord(Store store, String id) throws SQLException {
-        return !store.rows("SELECT 1 FROM dream_group_paired_names WHERE record_id=? LIMIT 1", id).isEmpty();
+        return !store.rows("""
+                SELECT 1 FROM dream_group_names n JOIN records r ON r.id=n.record_id AND r.revision=n.revision
+                WHERE n.record_id=? AND r.status='ONLINE' LIMIT 1
+                """, id).isEmpty();
     }
 
     /** 更正或撤回资料后，用原协议摘要查找受影响的原话。此处须能定位刚失效的旧资料。 */
