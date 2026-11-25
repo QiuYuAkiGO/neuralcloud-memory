@@ -29,6 +29,7 @@ class GroupRetainedRefs(DreamingCase):
         self.grant("allow-topic-source", self.topic_ref, DREAM, "CITE")
         self.member = self.qq(GROUP, AUTHOR, "933", "我给第一排的谱架贴了绿色标记。")
         self.peer = self.qq(GROUP, OTHER, "934", "我把计时表放到了入口。", card="朔禾")
+        self.witness = self.qq(GROUP, OTHER, "935", "徽音帮忙把散开的谱页按声部排好了。", mention_ids=[AUTHOR])
         old = self.batch(GROUP)
         self.previous = subject_change(speaker(old, self.earlier), "徽音", "我记得徽音入场前会核对总谱页码。", self.earlier)
         topic = change("topic", "铅笔库存", "我记得备用铅笔已单独清点。", [self.topic_ref])
@@ -52,8 +53,8 @@ class GroupRetainedRefs(DreamingCase):
         return subject_change(self.owner, "徽音", "我记得徽音会核对总谱页码，这次还给第一排谱架做了标记。", *sources, version=1)
 
     def test_same_member_can_keep_their_authorized_private_reference(self):
-        """批内只给本页两条群原话，现版人物档可携旧引用续写，两种材料仍各守原受众。"""
-        self.assertEvidence(self.page, self.member, self.peer)
+        """批内只给本页群原话，现版人物档可携旧引用续写，两种材料仍各守原受众。"""
+        self.assertEvidence(self.page, self.member, self.peer, self.witness)
         self.assertEqual(self.owner["person_id"], self.previous["person_id"])
         prior, = [p for p in self.page["profiles"] if p.get("person_id") == self.owner["person_id"]]
         self.assertEqual((prior["version"], prior["text"], prior["source_refs"]), (1, self.previous["text"], [self.earlier]))
@@ -63,6 +64,18 @@ class GroupRetainedRefs(DreamingCase):
         self.assertEqual((stored["person_id"], stored["version"], stored["text"]), (self.owner["person_id"], 2, proposal["text"]))
         self.assertCountEqual(stored["source_refs"], [self.earlier, self.member])
         self.assertEqual(self.post("profiles", {"context": audience(GROUP)})["profiles"], [])
+
+    def test_directed_third_party_witness_supports_the_member_but_cannot_carry_private_history(self):
+        """同一条明确 @ 徽音的见证可用于徽音档案。承接私聊依据时还须在提案中引用徽音自己的新话。"""
+        self.assertEqual(speaker(self.page, self.witness)["person_id"], self.other["person_id"])
+        current = subject_change(self.owner, "徽音", "我听群友说徽音把散开的谱页按声部排好了。", self.witness, version=1)
+        borrowed = dict(current, source_refs=[self.witness, self.earlier])
+        bad = self.command("witness-cannot-carry-private", borrowed)
+        self.assertEqual(self.post("commit", bad, 422)["code"], "INVALID_FIELD")
+        self.assertEqual(self.receipt(bad["event_id"])["status"], "NOT_FOUND")
+        self.assertEqual(self.post("commit", self.command("current-witness-only", current))["status"], "DURABLE")
+        stored, = [p for p in self.post("profiles", {"context": internal()})["profiles"] if p["kind"] == "person"]
+        self.assertEqual((stored["person_id"], stored["source_refs"]), (self.owner["person_id"], [self.witness]))
 
     def test_old_sources_cannot_be_reassigned_or_used_without_a_new_group_fact(self):
         """当前人的旧引用须有本页本人原话才能沿用，逐项核验原档归属、精确版本和仍有效的 CITE。"""
