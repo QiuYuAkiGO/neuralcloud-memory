@@ -3,10 +3,10 @@ import os
 from pathlib import Path
 import unittest
 
-from acceptance import ROOT, ServicePair, send
-from dreaming import DreamingCase, internal, publication
+from acceptance import ROOT, ServicePair, ref, send
+from dreaming import DreamingCase, FIELD, internal, publication
 from group_history_fixture import history_row, import_history
-from stage2 import AUTHOR, GROUP, OTHER
+from stage2 import ACCOUNT, AUTHOR, GROUP, OTHER
 
 
 GROUP_HISTORY = "group_history"
@@ -33,10 +33,14 @@ class GroupHistoryUpgrade(DreamingCase):
         """通过各真实版本的 HTTP 契约提交同一组历史命令。"""
         return send(self.service.base + "dreaming/" + route, body, self.service.token, expected)
 
-    def legacy(self, jar):
+    def start_legacy(self, jar, rows=()):
         self.service.memjar = jar
-        import_history(self.service, self.rows)
+        if rows:
+            import_history(self.service, rows)
         self.service.memory()
+
+    def cover(self):
+        """用旧版正常批次确认当前账本的尾部，并保留原命令以便升级后重放。"""
         page = self.batch(self.scope)
         self.assertGreater(page["through"], page["after"])
         cmd = publication(page, "covered-before-format-eight", [])
@@ -45,13 +49,17 @@ class GroupHistoryUpgrade(DreamingCase):
         self.assertEqual((empty["after"], empty["through"]), (saved["through"], saved["through"]))
         return cmd, saved
 
+    def legacy(self, jar):
+        self.start_legacy(jar, self.rows)
+        return self.cover()
+
     def restart(self, jar):
         self.stop_memory()
         self.service.memjar = jar
         self.service.memory()
 
-    def opted_in(self):
-        return self.post("batch", dict(context=internal(), scopes=[self.scope], limit=1,
+    def opted_in(self, limit=1):
+        return self.post("batch", dict(context=internal(), scopes=[self.scope], limit=limit,
                                        include_group_history=True))
 
     def confirm(self, page, key):
@@ -60,6 +68,45 @@ class GroupHistoryUpgrade(DreamingCase):
         self.assertEqual((saved["status"], saved["lane"], saved["after"], saved["through"]),
                          ("DURABLE", page["lane"], page["after"], page["through"]))
         return cmd, saved
+
+    def native(self, sender, number, text, room=GROUP):
+        """经 v7 正式渠道入账；没有 @ 机器人或回复关系的发言仍属于群成员原话。"""
+        channel = dict(platform="qq", type="qq_group", account_id=ACCOUNT, sender_id=sender,
+                       conversation_id=room, message_id=number)
+        return self.ingest("native-" + number, text, room, channel=channel)
+
+    def group_evidence_after_upgrade(self):
+        _, covered = self.cover()
+        self.restart(self.current)
+        result = []
+        page = self.opted_in(limit=16)
+        while page.get("lane") == GROUP_HISTORY:
+            self.assertLess(page["after"], page["through"])
+            result.extend(page["evidence"])
+            self.confirm(page, "group-page-" + str(page["after"]))
+            after = page["through"]
+            page = self.opted_in(limit=16)
+            if page.get("lane") == GROUP_HISTORY:
+                self.assertEqual(page["after"], after)
+        self.assertEqual((page["after"], page["through"]), (covered["through"], covered["through"]))
+        return result
+
+    def test_v7_native_member_message_covered_by_live_is_issued_again_for_group_history(self):
+        """旧提示词已经看过的原生成员发言，在新的群历史通道仍能以同一准确修订签发。"""
+        self.start_legacy(self.v7)
+        source = self.native(OTHER, "711", "我来归还今天排练的谱夹。")
+        message, = self.group_evidence_after_upgrade()
+        self.assertEqual((ref(message), message["conversation_id"], message["sender_id"], message["message_id"]),
+                         (source, GROUP, OTHER, "711"))
+
+    def test_native_protocol_duplicate_wins_and_nonmember_material_stays_out(self):
+        """同一协议消息只签原生修订；机器人、带来源的转述、未获准群均无签发记录。"""
+        self.start_legacy(self.v7, [self.rows[0]])
+        source = self.native(AUTHOR, "701", FIRST)
+        self.native(ACCOUNT, "712", "机器人说它已经完成。")
+        self.native(OTHER, "713", "另一个群已收回谱夹。", FIELD)
+        self.ingest("derived-native-member", "转述别人摆谱架。", GROUP, "self_expression", source_refs=[source])
+        self.assertEqual([ref(item) for item in self.group_evidence_after_upgrade()], [source])
 
     def test_replay_verified_group_history_after_v7_coverage_and_restart(self):
         """旧正常流已扫完；开启后仅有该群两条可核实原话，重启后从首条回执的位置续上。"""
