@@ -5,6 +5,7 @@ import unittest
 
 from acceptance import ROOT, ServicePair, ref, send
 from dreaming import DreamingCase, FIELD, internal, publication
+from dreaming_qq_aliases import speaker, subject_change
 from group_history_fixture import history_row, import_history
 from stage2 import ACCOUNT, AUTHOR, GROUP, OTHER, audience, private
 
@@ -107,6 +108,50 @@ class GroupHistoryUpgrade(DreamingCase):
         self.native(OTHER, "713", "另一个群已收回谱夹。", FIELD)
         self.ingest("derived-native-member", "转述别人摆谱架。", GROUP, "self_expression", source_refs=[source])
         self.assertEqual([ref(item) for item in self.group_evidence_after_upgrade()], [source])
+
+    def historic_profile(self):
+        """让 v7 确认旧观察之后，用 v8 真正签发的原话与配对名片建立一份人物档案。"""
+        card = history_row("左侧谱架名片", "23456", AUTHOR, "701", "原杉", card=True)
+        self.start_legacy(self.v7, [self.rows[0], card, self.rows[3]])
+        _, covered = self.cover()
+        self.restart(self.current)
+        page = self.opted_in()
+        evidence, = page["evidence"]
+        self.assertEqual((page["lane"], evidence["content"], evidence["card"]), (GROUP_HISTORY, FIRST, "原杉"))
+        item = subject_change(speaker(page, evidence), "原杉", "我记得原杉说自己先摆左边的谱架。", evidence)
+        cmd = dict(publication(page, "historical-music-stand", [item]), lane=GROUP_HISTORY, name_claims=[])
+        self.post("commit", cmd)
+        return covered["through"], item
+
+    def visible_profiles(self):
+        return self.post("profiles", {"context": audience(GROUP)})["profiles"]
+
+    def test_historical_profile_is_visible_to_its_group_while_enabled(self):
+        """同一授权保持开启时，档案绑定准确原话，剩余消息接续签发。"""
+        _, item = self.historic_profile()
+        stored, = self.visible_profiles()
+        self.assertEqual((stored["person_id"], stored["text"], stored["source_refs"]),
+                         (item["person_id"], item["text"], item["source_refs"]))
+        second, = self.opted_in()["evidence"]
+        self.assertEqual(second["content"], SECOND)
+
+    def test_disabling_group_history_hides_profile_and_reenabling_can_restore_it(self):
+        """中途关闭收回已发原话与档案；授权恢复时首条可重建，尚未确认的第二条仍可领取。"""
+        covered, item = self.historic_profile()
+        off = self.batch(*self.scopes)
+        self.assertEqual((off["after"], off["through"], off["evidence"]), (covered, covered, []))
+        self.assertEqual(self.visible_profiles(), [])
+
+        again = self.opted_in(limit=16)
+        self.assertEqual(again.get("lane"), GROUP_HISTORY)
+        self.assertCountEqual([e["content"] for e in again["evidence"]], [FIRST, SECOND])
+        prior = next((p["version"] for p in again["profiles"] if p.get("person_id") == item["person_id"]), 0)
+        restored = dict(item, expected_version=prior)
+        cmd = dict(publication(again, "restore-historical-stand", [restored]), lane=GROUP_HISTORY, name_claims=[])
+        self.post("commit", cmd)
+        profile, = self.visible_profiles()
+        self.assertEqual((profile["person_id"], profile["text"], profile["source_refs"]),
+                         (item["person_id"], item["text"], item["source_refs"]))
 
     def test_replay_verified_group_history_after_v7_coverage_and_restart(self):
         """旧正常流已扫完；开启后仅有该群两条可核实原话，重启后从首条回执的位置续上。"""
