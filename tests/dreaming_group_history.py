@@ -6,7 +6,7 @@ import unittest
 from acceptance import ROOT, ServicePair, ref, send
 from dreaming import DreamingCase, FIELD, internal, publication
 from group_history_fixture import history_row, import_history
-from stage2 import ACCOUNT, AUTHOR, GROUP, OTHER
+from stage2 import ACCOUNT, AUTHOR, GROUP, OTHER, audience, private
 
 
 GROUP_HISTORY = "group_history"
@@ -27,7 +27,7 @@ class GroupHistoryUpgrade(DreamingCase):
                      history_row("缺来源", "23456", AUTHOR, "703", UNVERIFIED),
                      history_row("答应同伴", "23456", OTHER, "704", SECOND)]
         self.rows[2][1].pop("provenance")
-        self.scope = GROUP
+        self.scopes = [GROUP]
 
     def post(self, route, body, expected=200):
         """通过各真实版本的 HTTP 契约提交同一组历史命令。"""
@@ -41,11 +41,11 @@ class GroupHistoryUpgrade(DreamingCase):
 
     def cover(self):
         """用旧版正常批次确认当前账本的尾部，并保留原命令以便升级后重放。"""
-        page = self.batch(self.scope)
+        page = self.batch(*self.scopes)
         self.assertGreater(page["through"], page["after"])
         cmd = publication(page, "covered-before-format-eight", [])
         saved = self.post("commit", cmd)
-        empty = self.batch(self.scope)
+        empty = self.batch(*self.scopes)
         self.assertEqual((empty["after"], empty["through"]), (saved["through"], saved["through"]))
         return cmd, saved
 
@@ -59,7 +59,7 @@ class GroupHistoryUpgrade(DreamingCase):
         self.service.memory()
 
     def opted_in(self, limit=1):
-        return self.post("batch", dict(context=internal(), scopes=[self.scope], limit=limit,
+        return self.post("batch", dict(context=internal(), scopes=self.scopes, limit=limit,
                                        include_group_history=True))
 
     def confirm(self, page, key):
@@ -113,7 +113,7 @@ class GroupHistoryUpgrade(DreamingCase):
         command, covered = self.legacy(self.v7)
         self.restart(self.current)
         # 旧调用方省略开关时，已覆盖账本仍返回正常水位。
-        previous_client = self.batch(self.scope)
+        previous_client = self.batch(*self.scopes)
         self.assertNotEqual(previous_client.get("lane"), GROUP_HISTORY)
         self.assertEqual((previous_client["after"], previous_client["through"], previous_client["evidence"]),
                          (covered["through"], covered["through"], []))
@@ -121,7 +121,7 @@ class GroupHistoryUpgrade(DreamingCase):
         first = self.opted_in()
         self.assertEqual(first.get("lane"), GROUP_HISTORY)
         evidence, = first["evidence"]
-        self.assertEqual((evidence["conversation_id"], evidence["content"]), (self.scope, FIRST))
+        self.assertEqual((evidence["conversation_id"], evidence["content"]), (GROUP, FIRST))
         group_command, group_receipt = self.confirm(first, "old-first-group-message")
         self.restart(self.current)
         for cmd, saved in ((command, covered), (group_command, group_receipt)):
@@ -138,7 +138,7 @@ class GroupHistoryUpgrade(DreamingCase):
             self.assertLess(cursor, page["through"])
             self.assertLessEqual(page["through"], covered["through"])
             for item in page["evidence"]:
-                self.assertEqual(item["conversation_id"], self.scope)
+                self.assertEqual(item["conversation_id"], GROUP)
                 texts.append(item["content"])
             _, saved = self.confirm(page, "continue-group-" + str(cursor))
             cursor = saved["through"]
@@ -149,25 +149,33 @@ class GroupHistoryUpgrade(DreamingCase):
     def test_new_group_lane_cannot_acknowledge_or_discard_pending_v7_identity(self):
         """未结的身份回扫从 v7 回执续传，误用群历史通道的旧页不能越权确认。"""
         v6 = Path(os.environ["NC_DREAMING_V6_JAR"]).resolve(strict=True)
-        _, covered = self.legacy(v6)
+        direct = private(AUTHOR)
+        self.scopes.append(direct)
+        self.start_legacy(v6, self.rows)
+        native_text = "我来收拾低声部的架子。"
+        native_source = self.native(OTHER, "714", native_text)
+        private_source = self.ingest("private-v6-identity", "我叫谷乔。", direct, context=audience(direct, "ROUTER"),
+                                     channel=dict(platform="qq", type="qq_private", account_id=ACCOUNT,
+                                                  sender_id=AUTHOR, conversation_id=direct, message_id="715"))
+        _, covered = self.cover()
         self.restart(self.v7)
-        first = self.batch(self.scope, limit=1)
+        first = self.batch(*self.scopes, limit=1)
         self.assertEqual(first.get("lane"), IDENTITY)
         old_command, saved = self.confirm(first, "v7-first-identity-page")
         self.assertLess(saved["through"], covered["through"])
         self.restart(self.current)
 
         # 先以旧版请求领取未结身份页；不能将相同位置按新通道确认。
-        pending = self.batch(self.scope, limit=1)
+        pending = self.batch(*self.scopes, limit=1)
         self.assertEqual((pending.get("lane"), pending["after"]), (IDENTITY, saved["through"]))
         wrong = dict(publication(pending, "wrong-group-lane", []), lane=GROUP_HISTORY, name_claims=[])
         self.post("commit", wrong, 409)
         self.assertEqual(self.receipt(wrong["event_id"])["status"], "NOT_FOUND")
-        self.assertEqual(self.batch(self.scope, limit=1), pending)
+        self.assertEqual(self.batch(*self.scopes, limit=1), pending)
         self.assertEqual(self.post("commit", old_command), saved)
 
         positions = {IDENTITY: saved["through"]}
-        group_texts = []
+        group_texts, identity_refs = [], []
         while True:
             page = self.opted_in()
             lane = page.get("lane", "live")
@@ -180,10 +188,14 @@ class GroupHistoryUpgrade(DreamingCase):
             self.assertLessEqual(page["through"], covered["through"])
             if lane == GROUP_HISTORY:
                 group_texts.extend(item["content"] for item in page["evidence"])
+            else:
+                identity_refs.extend(ref(item) for item in page["evidence"])
             _, receipt = self.confirm(page, lane + "-" + str(page["after"]))
             positions[lane] = receipt["through"]
         self.assertEqual(positions[IDENTITY], covered["through"])
-        self.assertCountEqual(group_texts, [FIRST, SECOND])
+        self.assertCountEqual(group_texts, [FIRST, SECOND, native_text])
+        self.assertIn(private_source, identity_refs)
+        self.assertNotIn(native_source, identity_refs)
         self.assertEqual((page["after"], page["through"]), (covered["through"], covered["through"]))
 
 
