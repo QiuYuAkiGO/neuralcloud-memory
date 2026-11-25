@@ -36,6 +36,18 @@ SELECT r.id,r.conversation,r.kind,r.status,v.revision,v.occurred,v.body FROM rec
 JOIN revisions v ON v.record_id=r.id AND v.seq=(
   SELECT max(prev.seq) FROM revisions prev WHERE prev.record_id=r.id AND prev.seq<=?) """;
 
+    /**
+     * 已知记录的查询在当前语句内提供同名的依赖视图。视图的三列与整库视图一致，
+     * 从这条记录的直接来源开始递归，供原有授权谓词检查所有上游的精确修订。
+     * 第一个占位符始终是目标记录 ID。
+     */
+    private static final String RECORD_DEPENDENCIES = """
+            WITH RECURSIVE evidence_dependencies(derived,source,revision) AS (
+                SELECT derived,source,revision FROM sources WHERE derived=?
+                UNION
+                SELECT d.derived,s.source,s.revision FROM evidence_dependencies d JOIN sources s ON s.derived=d.source)
+            """;
+
     private final CellSearch.Mode mode;
 
     final Visibility visibility;
@@ -79,11 +91,10 @@ JOIN revisions v ON v.record_id=r.id AND v.seq=(
     private List<JsonObject> refs(JsonObject row) throws SQLException {
         var sources =
                 store.rows(
-                        """
-WITH RECURSIVE deps(id,rev) AS (SELECT source,revision FROM sources WHERE derived=?
-UNION SELECT s.source,s.revision FROM sources s JOIN deps d ON s.derived=d.id)
-SELECT id AS record_id,rev AS revision FROM deps WHERE NOT EXISTS(SELECT 1 FROM sources WHERE derived=id)
-ORDER BY id""",
+                        RECORD_DEPENDENCIES + """
+                            SELECT d.source AS record_id,d.revision FROM evidence_dependencies d
+                            WHERE NOT EXISTS (SELECT 1 FROM sources s WHERE s.derived=d.source)
+                            ORDER BY d.source""",
                         get(row, "id"));
         return sources.isEmpty() ? List.of(ref(get(row, "id"), num(row, "revision"))) : sources;
     }
@@ -92,10 +103,9 @@ ORDER BY id""",
     String dependencyExpiry(String id) throws SQLException {
         var rows =
                 store.rows(
-                        """
-SELECT min(json_extract(v.body,'$.assertion.valid_until')) expiry
-FROM evidence_dependencies d JOIN revisions v ON v.record_id=d.source AND v.revision=d.revision
-WHERE d.derived=?""",
+                        RECORD_DEPENDENCIES + """
+                            SELECT min(json_extract(v.body,'$.assertion.valid_until')) expiry
+                            FROM evidence_dependencies d JOIN revisions v ON v.record_id=d.source AND v.revision=d.revision""",
                         id);
         var value = rows.getFirst().get("expiry");
         return value.isJsonNull() ? null : value.getAsString();
@@ -162,9 +172,8 @@ WHERE d.derived=?""",
         if (sharingDependent || (purpose.equals("HISTORY")
                 && (!get(row, "conversation").equals(ctx.scope())
                         || !store.rows(
-                                        "SELECT 1 FROM evidence_dependencies d JOIN records p ON"
-                                                + " p.id=d.source WHERE d.derived=? AND"
-                                                + " p.conversation<>? LIMIT 1",
+                                        RECORD_DEPENDENCIES + "SELECT 1 FROM evidence_dependencies d JOIN records p"
+                                                + " ON p.id=d.source WHERE p.conversation<>? LIMIT 1",
                                         get(row, "id"),
                                         ctx.scope())
                                 .isEmpty()))) out.addProperty("grant_dependent", true);
@@ -302,6 +311,7 @@ AND json_extract(v.body,'$.channel.account_id')=? AND json_extract(v.body,'$.cha
             keys(t, "record_id revision");
             String id = id(t, "record_id");
             var args = new ArrayList<Object>();
+            args.add(id);
             String join = LATEST;
             if (t.has("revision")) {
                 long revision = number(t, "revision", 1, Long.MAX_VALUE);
@@ -315,7 +325,8 @@ AND json_extract(v.body,'$.channel.account_id')=? AND json_extract(v.body,'$.cha
             }
             String policy = allowed(ctx, purpose, use, args);
             args.add(id);
-            var rows = store.rows(join + " WHERE " + policy + " AND r.id=?", args.toArray());
+            // 每个 target 只遍历自己的来源链，原受众、历史修订及撤回判定继续使用相同谓词。
+            var rows = store.rows(RECORD_DEPENDENCIES + join + " WHERE " + policy + " AND r.id=?", args.toArray());
             if (rows.isEmpty()) {
                 items.add(obj("status", "NOT_FOUND", "record_id", id));
                 continue;
@@ -445,16 +456,25 @@ ORDER BY v.seq DESC""",
         keys(
                 req,
                 "context kind query profile limit use subject_id predicate action_id as_of_valid"
-                        + " as_of_known_seq before");
+                        + " as_of_known_seq before qq_sender_id");
         var ctx = Access.from(store, req);
         String purpose = one(req, "kind", "HISTORY", "SELF_HISTORY", "SELF_IDENTITY", "IDENTITY");
         String use = use(req, purpose);
         one(req, "profile", "QUICK", "THINKING");
         String query = str(req, "query", 256);
+        // 发言者条件只缩小当前私聊受众的 CITE 范围。它不能替换受众，也不能转入事项时间线。
+        boolean bySender = req.has("qq_sender_id");
+        if (bySender) {
+            if (!purpose.equals("HISTORY") || !use.equals("CITE") || !req.has("before")
+                    || req.has("subject_id") || req.has("predicate") || req.has("action_id"))
+                throw invalid("qq_sender_id");
+            ctx.requireQq();
+            Access.qqId(req, "qq_sender_id");
+        }
         boolean validQuery = switch (purpose) {
             case "SELF_IDENTITY" -> query.isEmpty();
             case "IDENTITY" -> query.isEmpty() || !query.isBlank();
-            default -> !query.isBlank();
+            default -> !query.isBlank() || bySender && query.isEmpty();
         };
         if (!validQuery) throw invalid("query");
         int limit = (int) number(req, "limit", 1, purpose.equals("SELF_HISTORY") ? 16 : 50);
@@ -490,6 +510,7 @@ ORDER BY v.seq DESC""",
         var identities = new HashSet<String>();
         for (var row : rows) {
             JsonObject result = item(ctx, row, purpose, use, 0, 2048, "L1", at);
+            if (bySender) result.addProperty("speaker", "QQ 账号 " + get(req, "qq_sender_id"));
             if (purpose.equals("SELF_IDENTITY")) identities.add(get(result, "text"));
             if (result.has("assertion")) {
                 var a = object(result, "assertion");
@@ -599,6 +620,14 @@ ORDER BY v.seq DESC""",
                         + allowed(ctx, purpose, use(req, purpose), args)
                         + " AND r.status='ONLINE' AND v.occurred<?";
         args.add(before);
+        if (req.has("qq_sender_id")) {
+            // 同一候选条件用于词法种子和回复链邻居，避免邻接的其他作者被当作此人的发言。
+            where += " AND r.kind='observation' AND json_extract(v.body,'$.channel.type')"
+                    + " IN ('qq_private','qq_group','qq_group_notice')"
+                    + " AND json_extract(v.body,'$.channel.account_id')=? AND json_extract(v.body,'$.channel.sender_id')=?";
+            args.add(ctx.account());
+            args.add(get(req, "qq_sender_id"));
+        }
         if (req.has("action_id")) {
             where += " AND json_extract(v.body,'$.action_id')=?";
             args.add(text(req, "action_id", 256));
@@ -637,6 +666,11 @@ AND (json_type(v.body,'$.source_refs') IS NULL OR NOT EXISTS (
                                 + " v.occurred<? AND r.status='ONLINE' AND "
                                 + readable
                                 + ")))";
+            }
+            // 只问人物时直接在已授权的作者原话内按发生时间取数，原话无须包含自己的名字。
+            if (req.has("qq_sender_id") && query.isEmpty()) {
+                args.add(limit);
+                return store.rows(from + where + " ORDER BY v.occurred DESC,v.seq DESC LIMIT ?", args.toArray());
             }
             if (expanded) {
                 return new CellSearch(store)
