@@ -5,12 +5,14 @@ import static neuralcloud.memory.Fields.*;
 import com.google.gson.*;
 import java.sql.SQLException;
 import java.util.*;
+import java.util.regex.Pattern;
 
 /** 角色库中的人物及带证据的称呼。所有方法都使用调用方已经取得的 Memory 单写事务。 */
 final class DreamIdentities {
     private final Store store;
     private final Reader reader;
     private final String home;
+    private static final Pattern VOCATIVE = Pattern.compile("^([^，,：:\\r\\n]{1,128})[，,：:]\\s*(我.*)$", Pattern.DOTALL);
 
     /** 断言的每条来源都必须仍是当前修订、在线并可被 Dreaming 引用。读和再次推理共用此条件。 */
     private static final String CURRENT = """
@@ -76,7 +78,7 @@ final class DreamIdentities {
         if (kind.equals("self_expression")) e.addProperty("speaker_person_id", self());
         var channel = body.getAsJsonObject("channel");
         if (channel != null && Set.of("qq_private", "qq_group").contains(get(channel, "type"))) {
-            if (kind.equals("observation")) e.addProperty("speaker_person_id", qq(get(channel, "sender_id")));
+            if (kind.equals("observation")) annotateQqSpeaker(e, get(channel, "sender_id"));
             for (String field : List.of("message_id", "mention_ids", "reply_message_id", "nickname", "card"))
                 if (channel.has(field)) e.add(field, channel.get(field));
         }
@@ -85,6 +87,11 @@ final class DreamIdentities {
             e.addProperty("reviewed_person_id", qq(get(identity, "account_id")));
             e.add("reviewed_name", identity.get("name"));
         }
+    }
+
+    /** 两代渠道在各自边界验清发送者后，按同一 QQ 取得角色库内稳定人物。 */
+    void annotateQqSpeaker(JsonObject e, String sender) throws SQLException {
+        e.addProperty("speaker_person_id", qq(sender));
     }
 
     private List<JsonObject> manual(String pid) throws SQLException {
@@ -103,7 +110,7 @@ final class DreamIdentities {
         if (viewer == null) return true;
         for (var raw : refs(row)) {
             var ref = raw.getAsJsonObject();
-            var source = reader.currentFor(viewer, "CITE", get(ref, "record_id"));
+            var source = DreamGroupHistory.currentFor(store, reader, viewer, get(ref, "record_id"));
             if (source == null || !"ONLINE".equals(get(source, "status"))
                     || num(source, "revision") != num(ref, "revision")) return false;
         }
@@ -119,7 +126,7 @@ final class DreamIdentities {
     private record Choice(String name, Origin origin) {}
 
     /** 返回有效称呼及来源类别。全局改称按原话发生时间排列，独立证据允许在撤回后重选。 */
-    private List<Choice> choices(String pid, Collection<String> rooms, Access viewer) throws SQLException {
+    private List<Choice> choices(String pid, Collection<String> rooms) throws SQLException {
         var result = new ArrayList<Choice>();
         for (var m : manual(pid)) result.add(new Choice(get(m, "name"),
                 get(m, "name").equals(get(m, "subject")) ? Origin.MANUAL : Origin.MANUAL_ALIAS));
@@ -133,8 +140,7 @@ final class DreamIdentities {
                 """, pid, home);
         for (var claim : claims) {
             String scope = get(claim, "scope");
-            if (rooms != null && rooms.stream().noneMatch(room -> applicable(scope, room, viewer))
-                    || !applicable(scope, null, viewer) || !visible(claim, viewer)) continue;
+            if (rooms != null && !scope.equals("global") && !rooms.contains(scope)) continue;
             Origin origin = switch (get(claim, "relation")) {
                 case "PREFERRED_NAME" -> scope.equals("global") ? Origin.PREFERRED : Origin.DECLARED;
                 case "NICKNAME" -> Origin.NICKNAME;
@@ -165,14 +171,19 @@ final class DreamIdentities {
         if (rows.isEmpty()) return null;
         var old = rows.getFirst().get("primary_name");
         String prior = old.isJsonNull() ? null : old.getAsString();
-        String current = choose(choices(pid, null, null), prior);
+        String current = choose(choices(pid, null), prior);
         if (!Objects.equals(current, prior))
             store.update("UPDATE dream_identities SET primary_name=? WHERE person_id=?", current, pid);
         return viewer == null || current == null || permitsName(pid, current, viewer.scope(), viewer) ? current : null;
     }
 
     boolean permitsName(String pid, String name, String scope, Access viewer) throws SQLException {
-        return choices(pid, scope == null ? null : List.of(scope), viewer).stream().anyMatch(c -> c.name.equals(name));
+        for (var m : manual(pid)) if (name.equals(get(m, "name"))) return true;
+        // 这里只核准一个具体称呼。历史群每次发言都可能附同一名片，一份独立有效的依据即可证实它。
+        for (var claim : store.rows("SELECT c.scope,c.refs FROM dream_name_claims c"
+                + " WHERE c.person_id=? AND c.name=? AND c.confirmed=1 " + CURRENT, pid, name, home))
+            if (applicable(get(claim, "scope"), scope, viewer) && visible(claim, viewer)) return true;
+        return false;
     }
 
     /** 全部精确同名者均参与歧义判断，群名片只在它有依据的原群内参与查询。 */
@@ -254,7 +265,7 @@ final class DreamIdentities {
             String pid = entry.getKey();
             // 即使另一个群的卡片在同一角色库里有效，它也不能因同账号在本群出现而落入这个批次。
             var contexts = entry.getValue();
-            var displayed = choices(pid, contexts.isEmpty() ? Set.of("global") : contexts, null);
+            var displayed = choices(pid, contexts.isEmpty() ? Set.of("global") : contexts);
             // 首次签发即可引用获准的真实显示名。只有正式 commit 才会把它及其来源记入身份索引。
             for (var e : evidence) {
                 if (spokenBy(e, pid) && get(e, "kind").equals("observation")) {
@@ -322,11 +333,24 @@ final class DreamIdentities {
         return DreamNameStatements.declares(content, content, name, false, false);
     }
 
+    /** 对已核实的群发言，渠道 @ 和句首称呼都可指明听者。称呼后的自述归发件人。 */
+    String addressedSelfReport(JsonObject e) throws SQLException {
+        String content = get(e, "content").strip();
+        boolean directed = e.has("mention_ids") && !e.getAsJsonArray("mention_ids").isEmpty();
+        var addressed = VOCATIVE.matcher(content);
+        if (addressed.matches() && !ownersOf(addressed.group(1).strip(), get(e, "conversation_id")).isEmpty()) {
+            content = addressed.group(2);
+            directed = true;
+        }
+        return directed && DreamNameStatements.conversationalSelfReport(content) ? get(e, "speaker_person_id") : null;
+    }
+
     /** 空串代表无需称呼桥接；按名称定位时返回那一项供档案版本长期复核，无法消歧则不作归属。 */
     String attribution(String pid, JsonObject e) throws SQLException {
         var directed = mentionedAccounts(e);
-        if (!directed.isEmpty()) return directed.size() == 1 && directed.contains(pid) ? "" : null;
         String actor = e.has("speaker_person_id") ? get(e, "speaker_person_id") : null;
+        if (!directed.isEmpty())
+            return directed.size() == 1 && directed.contains(pid) ? "" : null;
         var mentions = mentionedNames(e);
         var others = new HashSet<String>();
         for (var names : mentions.values()) others.addAll(names);
@@ -381,8 +405,16 @@ final class DreamIdentities {
 
     private void recordField(JsonObject e, String personField, String field, String relation, String scope) throws SQLException {
         String name = get(e, field);
-        save(get(e, personField), name, relation, scope, List.of(obj("record_id", get(e, "record_id"),
-                "revision", num(e, "revision"), "quote", name)), get(e, "occurred_at"), true);
+        var message = obj("record_id", get(e, "record_id"), "revision", num(e, "revision"));
+        var sources = new ArrayList<JsonObject>();
+        sources.add(message);
+        // 历史名片是独立原件。群员说的是消息正文，显示名出自同一协议消息关联的资料修订。
+        if (e.has("channel_name_ref")) {
+            var metadata = e.getAsJsonObject("channel_name_ref").deepCopy();
+            metadata.addProperty("quote", name);
+            sources.add(metadata);
+        } else message.addProperty("quote", name);
+        save(get(e, personField), name, relation, scope, sources, get(e, "occurred_at"), true);
     }
 
     private record Proof(JsonObject evidence, String quote) {}

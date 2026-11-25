@@ -18,7 +18,7 @@ import java.util.*;
  * <ul>
  *   <li>通过目录内 {@code memory.lock} 文件排他锁确保同一角色主体目录同一时刻仅有一个写进程，避免并发破坏恢复边界。</li>
  *   <li>启用 WAL、{@code synchronous=FULL} 与外键约束，保证持久回执与事务原子落盘。</li>
- *   <li>启动事务内初始化格式 7 或升级旧库，核对 {@code character_id}、人物绑定及 FTS5，全部通过后才对外开放服务。</li>
+ *   <li>启动事务内初始化格式 8 或升级旧库，核对角色、人物绑定、群聊历史来源及 FTS5 后对外开放服务。</li>
  *   <li>通过 {@link #transaction(Work)} 串行化单次请求，保证读取水位（{@code read_seq}）与返回数据来自同一权威快照。</li>
  * </ul>
  */
@@ -72,7 +72,7 @@ final class Store implements AutoCloseable {
                         .isEmpty()) throw new IOException("unrecognized existing database");
                 schema("/schema.sql");
                 update("INSERT INTO meta VALUES(?,?)", character, UUID.randomUUID().toString());
-            } else if (version < 2 || version > 7)
+            } else if (version < 2 || version > 8)
                 throw new IOException("unsupported schema version " + version);
             // 旧库原地增加授权索引（v2 -> v3），保留原有流标识、版本与消费水位。
             if (version < 3) schema("/visibility.sql");
@@ -109,11 +109,17 @@ final class Store implements AutoCloseable {
                 schema("/dream-identity.sql");
                 schema("/dream-profile-people.sql");
             }
+            if (version < 8) {
+                schema("/dream-group-history.sql");
+                schema("/dream-group-progress.sql");
+            }
             var metadata = rows("SELECT * FROM meta").getFirst();
             // 校验目录归属的角色主体，防止错配配置把 A 角色的数据挂到 B 角色进程。
             if (!character.equals(get(metadata, "character_id")))
                 throw new IOException("character_id mismatch");
             stream = get(metadata, "stream_id");
+            // 在已有 v2 库内核验导入时留存的旧原件。新库的导入器会在原件全部写完后做同样的核验。
+            if (version < 8) DreamGroupHistory.index(this);
             dreamPeople = DreamPeople.load(this, peopleFile);
             // 人工绑定与既有 QQ、角色身份须在同一启动事务内通过校验，之后才可发布服务。
             DreamProfiles.bindExisting(this);

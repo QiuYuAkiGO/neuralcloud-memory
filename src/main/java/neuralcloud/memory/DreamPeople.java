@@ -141,9 +141,17 @@ final class DreamPeople {
         String speaker = null;
         if (kind.equals("self_expression")) speaker = self;
         if (kind.equals("observation") && channel != null && channel.has("sender_id")
-                && Set.of("qq_private", "qq_group").contains(get(channel, "type")))
-            speaker = qqSenders.get(get(channel, "sender_id"));
+                && Set.of("qq_private", "qq_group").contains(get(channel, "type"))) {
+            annotateQqSpeaker(evidence, get(channel, "sender_id"));
+            return;
+        }
         if (speaker != null) evidence.addProperty("speaker_subject", speaker);
+    }
+
+    /** 实时入站与经原始凭据验证的历史记录使用相同的人工主称呼。 */
+    void annotateQqSpeaker(JsonObject evidence, String sender) {
+        String subject = qqSenders.get(sender);
+        if (subject != null) evidence.addProperty("speaker_subject", subject);
     }
 
     /** 名字出现在原文时仅作为相关档案线索；只有精确登记的别称才会归并档案。 */

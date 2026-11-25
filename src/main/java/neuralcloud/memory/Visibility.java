@@ -37,7 +37,7 @@ record Visibility(boolean sessionIsolation) {
             // 本会话保留历史窗口。跨会话只共享现版，派生正文仍须逐一匹配在线来源的修订。
             return """
                     (r.conversation=? OR v.revision=r.revision)
-                    AND (r.status<>'ONLINE' OR NOT EXISTS (
+                    AND (r.status<>'ONLINE' OR NOT EXISTS (SELECT 1 FROM sources s WHERE s.derived=r.id) OR NOT EXISTS (
                         SELECT 1 FROM evidence_dependencies d WHERE d.derived=r.id AND NOT EXISTS (
                             SELECT 1 FROM records p WHERE p.id=d.source AND p.revision=d.revision AND p.status='ONLINE')))
                     """;
@@ -75,10 +75,10 @@ record Visibility(boolean sessionIsolation) {
         }
         args.add(ctx.scope());
         if (memberAccess) args.addAll(ctx.memberGroups());
-        // 失效记录只交付状态。在线记录的所有递归来源均须在当前受众下可引用。
+        // 原话没有上游，无需展开整库的递归依赖。派生记录仍逐一核对当前受众对全部上游的引用权。
         return independent + """
             (%s)
-            AND (r.status<>'ONLINE' OR NOT EXISTS (
+            AND (r.status<>'ONLINE' OR NOT EXISTS (SELECT 1 FROM sources s WHERE s.derived=r.id) OR NOT EXISTS (
                SELECT 1 FROM evidence_dependencies d WHERE d.derived=r.id AND NOT EXISTS (
                   SELECT 1 FROM records p WHERE p.id=d.source AND p.revision=d.revision
                   AND p.status='ONLINE' AND (%s))))

@@ -16,6 +16,10 @@ final class DreamNameStatements {
     private static final String END = "(?=\\s*(?:$|[，,。!！；;、]|就(?:好|行|可以)(?=$|[\\s，,。.!！；;])))";
     private static final Pattern DISAVOWED = Pattern.compile("假设|假如|假想|设想|开.{0,3}玩笑|逗你|才怪|骗你的|别当真|不要当真|扮演|转发|转述");
     private static final Pattern THIRD_PERSON = Pattern.compile("^(?:他|她|对方|别人|有人|听说|据说|我(?:的)?(?:朋友|同事|家人|同学)|我在转述)");
+    private static final Pattern FOLLOW_UP = Pattern.compile(
+            "^(.+(?:[。.!！]|\\R))\\s*(?:那(?:么)?\\s*)?(?:你们?|您|大家)[^。.!！?？\\r\\n]*[？?]+$", Pattern.DOTALL);
+    private static final Pattern QUESTION_ONLY = Pattern.compile("^[^。.!！\\r\\n]*[？?]+$");
+    private static final Pattern REPORTED_SPEECH = Pattern.compile("^(?:[>“‘「『\"]|(?:我(?:正在|只是|在|来)?|以下是)(?:转述|转发|引用))");
 
     /** 只认肯定的、以本人为主语的短句；引号中的他人话、问句和名称前缀不会通过。 */
     static boolean declares(String content, String quote, String name, boolean preferred, boolean global) {
@@ -56,6 +60,19 @@ final class DreamNameStatements {
                 && !DISAVOWED.matcher(raw).find()
                 && !raw.matches("(?s).*(?:[“‘「『\"]\\s*我|别人|对方|[？?]).*")
                 && !raw.matches("(?s)^我(?:觉得|认为|听说|听到|看见|看到|发现).+");
+    }
+
+    /** 群友先讲自己的事再问听者时，只有问句前完整的本人陈述可提供归属。整段中的引述和玩笑仍有效。 */
+    static boolean conversationalSelfReport(String words) {
+        if (directSelfReport(words)) return true;
+        var followUp = FOLLOW_UP.matcher(words);
+        return followUp.matches() && !INDIRECT.matcher(words).find() && !DISAVOWED.matcher(words).find()
+                && directSelfReport(followUp.group(1));
+    }
+
+    /** 单独向另一人提问，或明确声明自己正在转述，均不能单凭此句给任何一方确认人物事实。 */
+    static boolean onlyQuestionOrQuotation(String words) {
+        return QUESTION_ONLY.matcher(words).matches() || REPORTED_SPEECH.matcher(words).find();
     }
 
     static boolean locallyScoped(String content) { return LOCAL.matcher(content).find(); }

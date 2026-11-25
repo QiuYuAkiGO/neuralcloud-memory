@@ -1200,6 +1200,7 @@
         "additionalProperties": false,
         "properties": {
           "context": {"$ref":"#/components/schemas/Context"},
+          "include_group_history":{"type":"boolean","default":false,"description":"同时整理当前获准群内的历史成员发言。配套 Harness 自动启用。"},
           "scopes": {"type":"array","items":{"type":"string","minLength":1,"maxLength":256},"minItems":0,"maxItems":1024,"uniqueItems":true},
           "limit": {"type":"integer","minimum":1,"maximum":16}
         },
@@ -1208,7 +1209,7 @@
       "DreamChange": {
         "type": "object",
         "additionalProperties": false,
-        "description":"本批 QQ 人物认识须带已签发的 person_id。名称与内容依据分别复核。",
+        "description":"本批 QQ 人物认识须带已签发的 person_id。群历史修订至少引用一条本页成员原话，更新同一人的现行档案时还可保留该档已签发且仍获准的精确引用。名称与内容依据分别复核。",
         "if":{"properties":{"kind":{"const":"topic"}}},"then":{"not":{"required":["person_id"]}},
         "properties": {
           "kind": {"enum":["person","topic"]},
@@ -1291,6 +1292,7 @@
           "sender_id": {"type":"string","minLength":1,"maxLength":128},
           "speaker_person_id":{"$ref":"#/components/schemas/DreamPersonId"},
           "message_id":{"type":"string","minLength":1,"maxLength":128},
+          "channel_name_ref":{"$ref":"#/components/schemas/RecordRef","description":"从旧协议恢复昵称或群名片时，单独标明同一事件的资料来源和修订。"},
           "nickname":{"type":"string","minLength":1,"maxLength":128},
           "card":{"type":"string","minLength":1,"maxLength":128},
           "mention_ids":{"$ref":"#/components/schemas/QqMentions"},
@@ -1309,7 +1311,7 @@
           "policy_version": {"type":"integer","minimum":1},
           "after": {"type":"integer","minimum":0},
           "through": {"type":"integer","minimum":0},
-          "lane":{"const":"identity_backfill"},
+          "lane":{"enum":["identity_backfill","group_history"]},
           "persons":{"type":"array","items":{"$ref":"#/components/schemas/DreamPerson"}},
           "evidence": {"type":"array","items":{"$ref":"#/components/schemas/DreamEvidence"},"minItems":0},
           "profiles": {"type":"array","items":{"oneOf":[{"$ref":"#/components/schemas/DreamProfile"},{"$ref":"#/components/schemas/DreamIdentity"}]},"minItems":0},
@@ -1328,7 +1330,7 @@
           "policy_version": {"type":"integer","minimum":1},
           "after": {"type":"integer","minimum":0},
           "through": {"type":"integer","minimum":0},
-          "lane":{"const":"identity_backfill"},
+          "lane":{"enum":["identity_backfill","group_history"]},
           "name_claims":{"type":"array","minItems":0,"maxItems":16,"items":{"$ref":"#/components/schemas/DreamNameClaim"}},
           "changes": {"type":"array","items":{"$ref":"#/components/schemas/DreamChange"},"minItems":0,"maxItems":8}
         },
@@ -1365,7 +1367,7 @@
         "additionalProperties": false,
         "properties": {
           "status": {"const":"DURABLE"},
-          "lane":{"const":"identity_backfill"},
+          "lane":{"enum":["identity_backfill","group_history"]},
           "event_id": {"type":"string","minLength":1,"maxLength":256},
           "stream_id": {"type":"string","format":"uuid"},
           "policy_version": {"type":"integer","minimum":1},

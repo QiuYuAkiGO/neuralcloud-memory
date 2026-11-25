@@ -33,7 +33,11 @@ public final class ResidentV1Import {
         try (var store = new Store(target, args[3], args[4])) {
             store.update("ATTACH DATABASE ? AS old", memory.toUri() + "?mode=ro&immutable=1");
             store.update("ATTACH DATABASE ? AS ident", identity.toUri() + "?mode=ro&immutable=1");
-            var result = store.transaction(() -> convert(store));
+            var result = store.transaction(() -> {
+                var counts = convert(store);
+                DreamGroupHistory.index(store);
+                return counts;
+            });
             System.out.println(JSON.toJson(result));
         }
     }
@@ -289,7 +293,7 @@ public final class ResidentV1Import {
                         seconds.subtract(BigDecimal.valueOf(whole)).movePointRight(9).longValue()));
     }
 
-    private static String hash(String raw) {
+    static String hash(String raw) {
         try {
             return HexFormat.of()
                     .formatHex(

@@ -94,7 +94,7 @@ final class DreamProfiles {
         for (var entry : body.getAsJsonArray("source_refs")) {
             var ref = entry.getAsJsonObject();
             String id = get(ref, "record_id");
-            var source = viewer == null ? firsthand.find(id) : reader.currentFor(viewer, "CITE", id);
+            var source = viewer == null ? firsthand.find(id) : DreamGroupHistory.currentFor(store, reader, viewer, id);
             if (source == null || num(source, "revision") != num(ref, "revision")
                     || (viewer != null && !"ONLINE".equals(get(source, "status")))) return false;
         }

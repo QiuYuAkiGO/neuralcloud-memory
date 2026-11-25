@@ -554,6 +554,8 @@ WHERE r.conversation=? AND r.id=?""",
     /** 正常入账和离线迁移共用相同的在线词表与事件单元索引。 */
     static void index(Store store, String id, JsonObject body) throws SQLException {
         CellSearch.index(store, id, body);
+        // 和原文修订同事务更新群消息的协议身份，历史回扫按此索引核对发言人与重复消息。
+        DreamGroupHistory.indexNative(store, id, body);
         String searchable = get(body, "content");
         for (String k : List.of("speaker", "action_id"))
             if (body.has(k)) searchable += " " + get(body, k);
