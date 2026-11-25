@@ -195,6 +195,18 @@ class GroupHistory(DreamingCase):
         self.assertEqual(issued[refs[first[0]]["record_id"]]["channel_name_ref"], refs[card[0]])
         self.assertNotIn("channel_name_ref", issued[refs[bare[0]]["record_id"]])
 
+    def test_authorizing_the_original_room_does_not_turn_unpaired_metadata_into_speech(self):
+        """直接授权原会话允许引用正文。独立名片和相互冲突的名片始终是资料。"""
+        spoken = history_row("原会话成员发言", GID, AUTHOR, "965", "我把谱本送到了排练室。")
+        orphan = history_row("没有原话的名片", GID, OTHER, "966", "嘉澜", card=True)
+        one = history_row("同一原话的资料甲", GID, AUTHOR, "965", "清弦", card=True)
+        two = history_row("同一原话的资料乙", GID, AUTHOR, "965", "素弦", card=True)
+        rows = (spoken, orphan, one, two)
+        refs = history_refs(self.service, self.start(*rows), rows)
+        page = self.page(GROUP, spoken[1]["conversation_id"])
+        self.assertEvidence(page, refs[spoken[0]])
+        self.assertNotIn("channel_name_ref", page["evidence"][0])
+
     def test_group_scope_must_have_one_bot_and_stops_authorizing_after_removal(self):
         """旧群号不推测机器人；只有唯一获准映射能写、读，撤去该群后其他群的档案仍可见。"""
         local = history_row("本群原话", GID, AUTHOR, "991", "我负责本群的签到。")
