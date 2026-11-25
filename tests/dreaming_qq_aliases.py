@@ -161,6 +161,26 @@ class QQAliases(DreamingCase):
         self.assertNotEqual(person.get("subject"), "云舸")
         self.assertNotIn("云舸", person["aliases"])
 
+    def test_group_question_must_address_the_replying_account(self):
+        """群里可以围观并回复。只有原问题指向答话账号时，回答才能确认被问到的别称。"""
+        remark = self.qq(AUTHOR, "331", "我在收拾乐器。")
+        open_question = self.qq(OTHER, "332", "你也叫桦弦吗？")
+        bystander = self.qq(AUTHOR, "333", "是的。", reply_message_id="332")
+        page = self.batch(GROUP)
+        who = speaker(page, bystander)
+        self.publish(page, "bystander", [claim(who, "桦弦", "DIRECT_CONFIRMATION", open_question, bystander, scope=GROUP)])
+        # 询问者现在明确回复该成员先前的消息。两条相同的文字因此获得可核对的指向。
+        directed = self.qq(OTHER, "334", "你也叫桦弦吗？", reply_message_id="331")
+        reply = self.qq(AUTHOR, "335", "是的。", reply_message_id="334")
+        page = self.batch(GROUP)
+        who = speaker(page, reply)
+        self.assertNotIn("桦弦", [who.get("subject"), *who["aliases"]])
+        self.assertIn(ref(remark), [ref(e) for e in page["evidence"]])
+        self.publish(page, "addressed", [claim(who, "桦弦", "DIRECT_CONFIRMATION", directed, reply, scope=GROUP)])
+        probe = self.qq(AUTHOR, "336", "我听到了。")
+        who = speaker(self.batch(GROUP), probe)
+        self.assertIn("桦弦", [who.get("subject"), *who["aliases"]])
+
     def test_negative_quoted_conditional_or_joking_self_claim_stays_unconfirmed(self):
         """模型即使签成 SELF_NAME，原句里的否定、引用、假设和玩笑都不能变成这个账号的称呼。"""
         phrases = [(AUTHOR, "鹭羽", "我不叫鹭羽。"), (OTHER, "渡音", "他说：“我叫渡音。”"),
@@ -175,6 +195,21 @@ class QQAliases(DreamingCase):
             person = speaker(verified, source)
             self.assertNotEqual(person.get("subject"), name)
             self.assertNotIn(name, person["aliases"])
+
+    def test_clipped_quote_cannot_remove_a_multisentence_qualifier(self):
+        """截下来的句子都像自称，但完整原话分别是跨句引语、假设和事后明确点出的玩笑。"""
+        items = [(AUTHOR, "赤笙", "朋友转述了一段话：“今天下雨了。我叫赤笙。”"),
+                 (OTHER, "青鹭", "这是一段假设。我叫青鹭。"),
+                 ("45678", "叶莺", "我叫叶莺。刚才是开玩笑的。")]
+        words = [self.qq(account, str(420 + i), body) for i, (account, _, body) in enumerate(items)]
+        page = self.batch(GROUP)
+        self.publish(page, "clipped", [claim(speaker(page, s), name, "SELF_NAME", dict(s, quote="我叫" + name))
+                                        for s, (_, name, _) in zip(words, items)])
+        probes = [self.qq(account, str(430 + i), "我收到了。") for i, (account, _, _) in enumerate(items)]
+        page = self.batch(GROUP)
+        for s, (_, name, _) in zip(probes, items):
+            who = speaker(page, s)
+            self.assertNotIn(name, [who.get("subject"), *who["aliases"]])
 
     def test_ordinary_alias_survives_one_withdrawal_but_not_both(self):
         """两份独立的本人原话都支持别称；先后撤回时，只在最后一份失效后移出已确认称呼。"""
@@ -215,6 +250,37 @@ class QQAliases(DreamingCase):
         local = self.batch(GROUP, FIELD)
         found, = [p for p in local["persons"] if p["person_id"] == person_id]
         self.assertIn("晚潮", [found.get("subject"), *found["aliases"]])
+
+    def test_unique_initial_display_can_publish_now_and_survive_an_ordinary_alias(self):
+        """首次签发的唯一渠道昵称就可作主名；普通别称只在该昵称唯一来源撤回后接替它。"""
+        display = self.qq(AUTHOR, "611", "我喜欢整理演出说明。", nickname="千屿")
+        first = self.batch(GROUP)
+        who = speaker(first, display)
+        self.assertEqual(who.get("subject"), "千屿")
+        self.publish(first, "display-and-note", changes=[subject_change(who, "千屿", "我记得其喜欢整理说明。", display)])
+        alternate = self.qq(AUTHOR, "612", "我也叫晓渠。")
+        page = self.batch(GROUP)
+        self.publish(page, "ordinary-alias", [claim(speaker(page, alternate), "晓渠", "SELF_NAME", alternate)])
+        self.assertEqual([p["subject"] for p in self.profiles()], ["千屿"])
+        self.withdraw(display, GROUP)
+        probe = self.qq(AUTHOR, "613", "资料已整理。")
+        after = speaker(self.batch(GROUP), probe)
+        self.assertEqual((after["person_id"], after.get("subject")), (who["person_id"], "晓渠"))
+
+    def test_equal_display_candidates_have_no_primary_until_a_clear_self_name(self):
+        """两个同级渠道显示名同时首次出现，缺少唯一首选时等本人给出明确称呼。"""
+        self.qq(AUTHOR, "621", "第一场排练。", nickname="岑北")
+        again = self.qq(AUTHOR, "622", "第二场排练。", nickname="岑南")
+        initial = self.batch(GROUP)
+        self.assertNotIn("subject", speaker(initial, again))
+        self.publish(initial, "two-displays")
+        explicit = self.qq(AUTHOR, "623", "我叫小岑。")
+        page = self.batch(GROUP)
+        who = speaker(page, explicit)
+        self.assertNotIn("subject", who)
+        self.publish(page, "explicit-name", [claim(who, "小岑", "SELF_NAME", explicit)])
+        later = self.qq(AUTHOR, "624", "第三场排练。")
+        self.assertEqual(speaker(self.batch(GROUP), later)["subject"], "小岑")
 
     def test_global_preference_renames_only_automatically_chosen_primary(self):
         """同样的明确全局改称能更改自动主名，已经人工指定主名的另一人仍沿用原名。"""
