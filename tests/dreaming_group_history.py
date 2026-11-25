@@ -1,10 +1,11 @@
 """用真实旧版 Memory 导入合成 v1 快照，经 HTTP 验证格式 8 群原话回扫的升级与隔离。"""
+import json
 import os
 from pathlib import Path
 import unittest
 
 from acceptance import ROOT, ServicePair, ref, send
-from dreaming import DreamingCase, FIELD, internal, publication
+from dreaming import DreamingCase, FIELD, change, internal, publication
 from dreaming_qq_aliases import speaker, subject_change
 from group_history_fixture import history_row, import_history
 from stage2 import ACCOUNT, AUTHOR, GROUP, OTHER, audience, private
@@ -70,10 +71,10 @@ class GroupHistoryUpgrade(DreamingCase):
                          ("DURABLE", page["lane"], page["after"], page["through"]))
         return cmd, saved
 
-    def native(self, sender, number, text, room=GROUP):
+    def native(self, sender, number, text, room=GROUP, **metadata):
         """经 v7 正式渠道入账；没有 @ 机器人或回复关系的发言仍属于群成员原话。"""
         channel = dict(platform="qq", type="qq_group", account_id=ACCOUNT, sender_id=sender,
-                       conversation_id=room, message_id=number)
+                       conversation_id=room, message_id=number, **metadata)
         return self.ingest("native-" + number, text, room, channel=channel)
 
     def group_evidence_after_upgrade(self):
@@ -108,6 +109,50 @@ class GroupHistoryUpgrade(DreamingCase):
         self.native(OTHER, "713", "另一个群已收回谱夹。", FIELD)
         self.ingest("derived-native-member", "转述别人摆谱架。", GROUP, "self_expression", source_refs=[source])
         self.assertEqual([ref(item) for item in self.group_evidence_after_upgrade()], [source])
+
+    def test_group_member_update_can_retain_valid_earlier_source_from_the_same_group(self):
+        """同一成员的旧档可合并本页原话，已合法入档的本群依据仍可保留。"""
+        self.start_legacy(self.v7, [self.rows[0]])
+        earlier = self.native(AUTHOR, "720", "我每次收齐谱夹后会数一遍。", card="原杉")
+        old = self.batch(*self.scopes)
+        previous = subject_change(speaker(old, earlier), "原杉", "我记得原杉收齐谱夹后会清点。", earlier)
+        self.post("commit", dict(publication(old, "old-member-profile", [previous]), name_claims=[]))
+        stored, = self.visible_profiles()
+        self.restart(self.current)
+
+        page = self.opted_in()
+        self.assertEqual(page.get("lane"), GROUP_HISTORY)
+        first, = [e for e in page["evidence"] if e["content"] == FIRST]
+        owner = speaker(page, first)
+        self.assertEqual(owner["person_id"], stored["person_id"])
+        update = subject_change(owner, "原杉", "我记得原杉会先摆左边的谱架，也会清点谱夹。", earlier, first,
+                                version=stored["version"])
+        cmd = dict(publication(page, "member-both-sources", [update]), lane=GROUP_HISTORY, name_claims=[])
+        self.post("commit", cmd)
+        current, = self.visible_profiles()
+        self.assertEqual((current["person_id"], current["text"]), (stored["person_id"], update["text"]))
+        self.assertCountEqual(current["source_refs"], [earlier, ref(first)])
+
+    def test_historical_group_topic_mention_cannot_disclose_private_or_bot_context(self):
+        """普通旧主题可以持有自己的合法依据，但群员仅仅提到主题不会获得私聊和机器人内容。"""
+        direct = private(AUTHOR)
+        self.scopes.append(direct)
+        self.start_legacy(self.v7, [self.rows[0]])
+        private_text, bot_text = "排练谱架背面的专属储物约定。", "机器人此前答应去领谱架。"
+        secret = self.ingest("private-stand", private_text, direct, context=audience(direct, "ROUTER"),
+                             channel=dict(platform="qq", type="qq_private", account_id=ACCOUNT,
+                                          sender_id=AUTHOR, conversation_id=direct, message_id="721"))
+        bot = self.ingest("bot-stand", bot_text, GROUP, "self_expression")
+        topic = change("topic", "谱架", "我知道仅在私聊谈过这个储物约定。", [secret, bot])
+        self.post("commit", publication(self.batch(*self.scopes), "prior-stand-topic", [topic]))
+        self.restart(self.current)
+
+        page = self.opted_in(limit=16)
+        self.assertEqual(page.get("lane"), GROUP_HISTORY)
+        self.assertEqual([e["content"] for e in page["evidence"]], [FIRST])
+        delivered = json.dumps(page, ensure_ascii=False)
+        for confidential in (private_text, bot_text, topic["text"], secret["record_id"], bot["record_id"]):
+            self.assertNotIn(confidential, delivered)
 
     def historic_profile(self):
         """让 v7 确认旧观察之后，用 v8 真正签发的原话与配对名片建立一份人物档案。"""
