@@ -38,6 +38,31 @@ class GroupHistory(DreamingCase):
     def profiles(self, room=None):
         return self.post("profiles", {"context": internal() if room is None else audience(room)})["profiles"]
 
+    def test_live_members_emit_text_and_captions_once_and_keep_separate_identity_review(self):
+        """新启用时先签发一条群话。实时收到重复副本、纯图或机器人发言时，只留下附文和独立身份审核。"""
+        self.service.memory()
+
+        def message(event_id, sender, number, text):
+            return self.ingest(event_id, text, GROUP, channel=dict(platform="qq", type="qq_group", account_id=ACCOUNT,
+                               sender_id=sender, conversation_id=GROUP, message_id=number))
+
+        first = message("首份协议消息", AUTHOR, "551", "我把各声部的曲谱排好了。")
+        initial = self.page(GROUP)
+        self.assertEvidence(initial, first)
+        self.publish(initial, [])
+        message("相同协议的另一份入账", AUTHOR, "551", "我把各声部的曲谱排好了。")
+        message("只有图片", AUTHOR, "552", "【图片1】")
+        message("机器人出声", ACCOUNT, "553", "我替大家确认过了。")
+        caption = message("图片有附文", OTHER, "554", "【图片1】我给谱夹加了颜色标记。")
+        reviewed = self.ingest("原有的独立身份审核", "管理员核实了这位成员的称呼。", GROUP,
+                               context=audience(GROUP, "ORCHESTRATOR"), identity=dict(account_id="68668", name="澄容"))
+        live = self.page(GROUP)
+        self.assertEvidence(live, caption, reviewed)
+        note, = [e for e in live["evidence"] if ref(e) == reviewed]
+        self.assertEqual(note["reviewed_name"], "澄容")
+        self.assertTrue(note["reviewed_person_id"])
+        self.assertNotIn("speaker_person_id", note)
+
     def test_members_can_publish_separate_facts_without_addressing_the_bot(self):
         """两人在同一群对话，名片与自称各有依据；撤掉名片，只失效以它命名的档案。"""
         first = history_row("带谱的成员", GID, AUTHOR, "-701", "我带了两本校订过的总谱。")
