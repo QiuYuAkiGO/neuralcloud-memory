@@ -7,15 +7,16 @@ import java.sql.SQLException;
 import java.util.List;
 
 /**
- * 阶段 2 跨会话受众可见性策略与原作者版本授权决策。
+ * 当前角色的会话可见性策略与原作者版本授权决策。
  *
  * <p>职责：
  * <ul>
  *   <li>生成统一的受众过滤 SQL 条件，供召回排名、原文读取、卡片目录与派生发布共享，确保越权候选在 Top-K 之前即被过滤。</li>
  *   <li>处理经可信 QQ 渠道认证的原作者授权（grant）与撤销（revoke）命令；授权严格绑定到单条原文的精确修订版本。</li>
  * </ul>
+ * @param sessionIsolation 为 true 时按会话、授权和已核验成员筛选，为 false 时共享本角色所有隐私等级的现版。
  */
-final class Visibility {
+record Visibility(boolean sessionIsolation) {
     /** 授予跨会话可见性权限的 HTTP 路由名。 */
     static final String GRANTS = "visibility-grants";
 
@@ -27,56 +28,62 @@ final class Visibility {
     /**
      * 构造受众可见性 SQL 谓词，并按占位符顺序将参数追加到 {@code args}。
      *
-     * <p>调用方在排名、原文窗口、卡片目录和派生发布处共用同一条件。
-     * <ul>
-     *   <li>{@code use=LOCAL}（兼容省略 use 的旧客户端）：仅限当前会话自身记录，且排除依赖其他会话来源的派生内容。</li>
-     *   <li>{@code use=READ/CITE}：允许当前会话记录，或已获针对当前修订版本的有效跨会话授权（CITE 包含 READ）。</li>
-     *   <li>对于仍在线（ONLINE）的派生记录，必须确保其全部递归依赖（{@code evidence_dependencies}）
-     *       在当前受众下均具备在线且可引用的 {@code CITE} 权限；一旦任一上游撤权或修订，派生正文立即对该受众隐藏。</li>
-     * </ul>
+     * <p>排名、原文、目录及派生发布均在截断前使用该条件。共享许可涵盖所有隐私等级的现版，
+     * 上游逐条核对其确切修订、在线状态及引用权，避免通过一条可读回复带出隐藏来源。
      */
-    // 在排名、原文窗口和派生发布处使用同一个受众条件。派生正文须可引用所有依赖。
-    static String allowed(Access ctx, String use, List<Object> args) {
+    String allowed(Access ctx, String use, List<Object> args) {
         args.add(ctx.scope());
+        if (!sessionIsolation) {
+            // 本会话保留历史窗口。跨会话只共享现版，派生正文仍须逐一匹配在线来源的修订。
+            return """
+                    (r.conversation=? OR v.revision=r.revision)
+                    AND (r.status<>'ONLINE' OR NOT EXISTS (
+                        SELECT 1 FROM evidence_dependencies d WHERE d.derived=r.id AND NOT EXISTS (
+                            SELECT 1 FROM records p WHERE p.id=d.source AND p.revision=d.revision AND p.status='ONLINE')))
+                    """;
+        }
+        // 已交付过的目录称呼可能不在原始正文里，回切时连同引用它的回复、摘要一起收回。
+        String independent = "json_extract(v.body,'$.requires_identity_lookup') IS NULL AND ";
         String privacy = ctx.externalAudience()
                 ? " AND json_extract(v.body,'$.privacy') IN ('public','private')" : "";
         if (use.equals("LOCAL")) {
+            // 隔离模式下省略 use 的旧客户端只读本会话，包含外会话来源的派生正文也要隐藏。
             args.add(ctx.scope());
-            return "r.conversation=? "
+            return independent + "r.conversation=? "
                     + privacy
                     + " AND NOT EXISTS (SELECT 1 FROM evidence_dependencies d "
                     + "JOIN records p ON p.id=d.source WHERE d.derived=r.id AND p.conversation<>?)";
         }
+        String direct = "(r.conversation=?" + privacy + ")" + """
+                     OR (v.revision=r.revision AND EXISTS (
+                        SELECT 1 FROM visibility_grants g WHERE g.record_id=r.id AND g.revision=v.revision
+                        AND g.target=? AND g.status='ACTIVE' AND (g.use='CITE' OR g.use=?)))
+                    """;
         args.add(ctx.scope());
         args.add(use);
-        String direct = "", dependency = "";
-        String memberNotices =
-                MEMBER_NOTICES.formatted(
-                        String.join(
-                                ",",
-                                java.util.Collections.nCopies(ctx.memberGroups().size(), "?")));
-        if (!ctx.memberGroups().isEmpty()) {
+        String sourceRight = """
+                    EXISTS (SELECT 1 FROM audience_rights a WHERE a.id=p.id AND a.revision=p.revision
+                            AND a.audience=? AND a.use='CITE')
+                    """;
+        boolean memberAccess = !ctx.memberGroups().isEmpty();
+        if (memberAccess) {
+            String memberNotices = MEMBER_NOTICES.formatted(
+                    String.join(",", java.util.Collections.nCopies(ctx.memberGroups().size(), "?")));
+            direct += " OR (r.id,v.revision) IN (" + memberNotices + ")";
+            sourceRight += " OR (p.id,p.revision) IN (" + memberNotices + ")";
             args.addAll(ctx.memberGroups());
-            direct = " OR (r.id,v.revision) IN (" + memberNotices + ")";
         }
         args.add(ctx.scope());
-        if (!ctx.memberGroups().isEmpty()) {
-            args.addAll(ctx.memberGroups());
-            dependency = " AND (d.source,d.revision) NOT IN (" + memberNotices + ")";
-        }
-        // 注意：跨会话授权只匹配当前最新修订（v.revision=r.revision），且状态为 ACTIVE。
-        // 非 ONLINE 项（如 RETRACTED/SOURCE_CHANGED）跳过依赖检查，以便读接口可向原有受众返回失效状态而非正文。
-        return """
-            ((r.conversation=? %s) OR (v.revision=r.revision AND EXISTS (
-               SELECT 1 FROM visibility_grants g WHERE g.record_id=r.id AND g.revision=v.revision
-               AND g.target=? AND g.status='ACTIVE' AND (g.use='CITE' OR g.use=?))) %s)
+        if (memberAccess) args.addAll(ctx.memberGroups());
+        // 失效记录只交付状态。在线记录的所有递归来源均须在当前受众下可引用。
+        return independent + """
+            (%s)
             AND (r.status<>'ONLINE' OR NOT EXISTS (
                SELECT 1 FROM evidence_dependencies d WHERE d.derived=r.id AND NOT EXISTS (
-                  SELECT 1 FROM audience_rights a JOIN records p ON p.id=a.id
-                  WHERE a.id=d.source AND a.revision=d.revision AND a.audience=? AND a.use='CITE'
-                  AND p.status='ONLINE') %s))
+                  SELECT 1 FROM records p WHERE p.id=d.source AND p.revision=d.revision
+                  AND p.status='ONLINE' AND (%s))))
             """
-                .formatted(privacy, direct, dependency);
+                .formatted(direct, sourceRight);
     }
 
     /** 同群成员仅能引用群通知的在线现版。派生回复的每条证据也使用同一集合复核。 */
@@ -167,6 +174,4 @@ final class Visibility {
                 grant);
         return new Decision(get(row, "record_id"), num(row, "revision"), grant);
     }
-
-    private Visibility() {}
 }

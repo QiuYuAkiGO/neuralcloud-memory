@@ -14,8 +14,7 @@ import java.util.*;
  *
  * <p>职责与边界：
  * <ul>
- *   <li>严格区分三种读取目的：{@code HISTORY}（会话/跨会话授权历史）、{@code SELF_IDENTITY}（经确认的本人称呼）
- *       与 {@code SELF_HISTORY}（可信 QQ 私聊入站本人在本账号下的历史原话）。</li>
+ *   <li>按 HISTORY、SELF_IDENTITY、SELF_HISTORY 和 IDENTITY 分别交付历史、本人称呼、本人原话和账号身份目录。</li>
  *   <li>将受众过滤、有效时间过滤与显式替代判断尽量下推到候选截断（LIMIT）之前，避免越权或过期记录挤占 Top-K。</li>
  *   <li>所有读响应共用同一次事务内的 {@code stream_id} 与 {@code read_seq} 快照，供 Harness 登记证据和补查变更。</li>
  * </ul>
@@ -39,13 +38,14 @@ JOIN revisions v ON v.record_id=r.id AND v.seq=(
 
     private final CellSearch.Mode mode;
 
-    Reader(Store store) {
-        this(store, CellSearch.Mode.LEXICAL);
-    }
+    final Visibility visibility;
+    private static final String CONFIRMED_IDENTITY =
+            "r.kind='observation' AND json_type(v.body,'$.identity')='object'";
 
-    Reader(Store store, CellSearch.Mode mode) {
+    Reader(Store store, CellSearch.Mode mode, Visibility visibility) {
         this.store = store;
         this.mode = mode;
+        this.visibility = visibility;
     }
 
     /**
@@ -154,7 +154,12 @@ WHERE d.derived=?""",
             out.remove("citation_scope");
             out.addProperty("use", "READ");
         }
-        if (purpose.equals("HISTORY")
+        // 同一私聊的敏感资料、目录资料及其派生正文也可能在回切后失效，须送入 Harness 的逐轮复核。
+        boolean sharingDependent = purpose.equals("IDENTITY")
+                || body.has("requires_identity_lookup")
+                || (!visibility.sessionIsolation() && ctx.externalAudience()
+                        && "sensitive".equals(get(body, "privacy")));
+        if (sharingDependent || (purpose.equals("HISTORY")
                 && (!get(row, "conversation").equals(ctx.scope())
                         || !store.rows(
                                         "SELECT 1 FROM evidence_dependencies d JOIN records p ON"
@@ -162,9 +167,11 @@ WHERE d.derived=?""",
                                                 + " p.conversation<>? LIMIT 1",
                                         get(row, "id"),
                                         ctx.scope())
-                                .isEmpty())) out.addProperty("grant_dependent", true);
-        if (purpose.equals("SELF_IDENTITY")) {
-            value = get(object(body, "identity"), "name");
+                                .isEmpty()))) out.addProperty("grant_dependent", true);
+        if (purpose.equals("SELF_IDENTITY") || purpose.equals("IDENTITY")) {
+            var identity = object(body, "identity");
+            value = get(identity, "name");
+            if (purpose.equals("IDENTITY")) out.addProperty("identity_account_id", get(identity, "account_id"));
         } else if (purpose.equals("SELF_HISTORY")) {
             out.addProperty(
                     "source_venue",
@@ -183,13 +190,16 @@ WHERE d.derived=?""",
             for (String key : List.of("speaker", "source_venue", "action_id", "assertion", "topic"))
                 if (body.has(key)) out.add(key, body.get(key));
             // 跨会话引用他人原话时去除原会话第一人称语境，避免目标受众把“用户/当前 QQ 私聊”误解为自己。
-            if (!get(row, "conversation").equals(ctx.scope()) && body.has("channel")) {
-                if (get(object(body, "channel"), "type").equals("qq_group_notice"))
+            if (!get(row, "conversation").equals(ctx.scope())) {
+                if (body.has("channel") && get(object(body, "channel"), "type").equals("qq_group_notice"))
                     out.addProperty("member_notice", true);
                 if (out.has("speaker") && "用户".equals(get(out, "speaker")))
                     out.addProperty("speaker", "原发言者");
-                if (out.has("source_venue") && "当前 QQ 私聊".equals(get(out, "source_venue")))
-                    out.addProperty("source_venue", "QQ 私聊");
+                if (out.has("source_venue")) {
+                    String venue = get(out, "source_venue");
+                    if (venue.equals("当前 QQ 私聊") || venue.equals("当前控制台会话"))
+                        out.addProperty("source_venue", venue.substring("当前".length()).stripLeading());
+                }
             }
             // 若断言的 supersedes_ref 指向当前受众无权访问或已失效的跨会话前序记录，则裁剪该引用避免信息泄露。
             if (out.has("assertion")
@@ -211,31 +221,43 @@ WHERE d.derived=?""",
     /**
      * 按读取目的生成 SQL 可见范围条件：
      * <ul>
-     *   <li>{@code SELF_HISTORY}：要求可信 QQ 私聊身份，仅返回同一机器人账号下由该本人发出的非 sensitive 原话。</li>
+     *   <li>{@code SELF_HISTORY}：要求可信 QQ 私聊身份，按账号和作者返回本人的原话。</li>
      *   <li>{@code SELF_IDENTITY}：仅返回与该 QQ 账号匹配的经审核身份观测记录。</li>
+     *   <li>{@code IDENTITY}：共享期间可回读任一账号有明确归属且当前无冲突的确认记录。</li>
      *   <li>{@code HISTORY}：委托 {@link Visibility#allowed} 应用同会话与跨会话版本授权策略。</li>
      * </ul>
      */
     private String allowed(Access ctx, String purpose, String use, List<Object> args) {
+        String privacy = visibility.sessionIsolation() ? " AND json_extract(v.body,'$.privacy') IN ('public','private')" : "";
         if (purpose.equals("SELF_HISTORY")) {
             ctx.requireQq();
             args.add(ctx.account());
             args.add(ctx.peer());
             return """
-r.kind='observation' AND json_extract(v.body,'$.privacy') IN ('public','private')
+r.kind='observation'
 AND json_extract(v.body,'$.channel.type') IN ('qq_private','qq_group','qq_group_notice')
-AND json_extract(v.body,'$.channel.account_id')=? AND json_extract(v.body,'$.channel.sender_id')=? """;
+AND json_extract(v.body,'$.channel.account_id')=? AND json_extract(v.body,'$.channel.sender_id')=? """ + privacy;
         }
         if (purpose.equals("SELF_IDENTITY")) {
             if (ctx.peer() == null) return "0";
             args.add(ctx.peer());
-            return "r.kind='observation' AND json_extract(v.body,'$.identity.account_id')=? AND"
-                       + " json_extract(v.body,'$.privacy') IN ('private','public')";
+            return CONFIRMED_IDENTITY + " AND json_extract(v.body,'$.identity.account_id')=?" + privacy;
         }
-        return Visibility.allowed(ctx, use, args);
+        if (purpose.equals("IDENTITY")) {
+            if (visibility.sessionIsolation()) return "0";
+            // 即使原 ID 和版本均未变，另一条有矛盾的在线确认也会使它退出可交付的身份目录。
+            return CONFIRMED_IDENTITY + """
+                     AND NOT EXISTS (SELECT 1 FROM records p JOIN revisions pv
+                        ON pv.record_id=p.id AND pv.revision=p.revision
+                        WHERE p.kind='observation' AND p.status='ONLINE'
+                        AND json_extract(pv.body,'$.identity.account_id')=json_extract(v.body,'$.identity.account_id')
+                        AND json_extract(pv.body,'$.identity.name')<>json_extract(v.body,'$.identity.name'))
+                    """;
+        }
+        return visibility.allowed(ctx, use, args);
     }
 
-    /** 解析读取用途 {@code use}：仅 HISTORY 允许指定 READ/CITE，省略时回落为首版同会话 LOCAL 语义。 */
+    /** 只有 HISTORY 接受 READ/CITE；省略时由服务端的会话策略决定普通历史的可见范围。 */
     private static String use(JsonObject req, String purpose) {
         if (!req.has("use")) return "LOCAL";
         if (!purpose.equals("HISTORY")) throw invalid("use");
@@ -244,8 +266,13 @@ AND json_extract(v.body,'$.channel.account_id')=? AND json_extract(v.body,'$.cha
 
     /** 按受众权限与用途查询某条记录的当前最新版本，不可见或不存在时统一返回 null。 */
     JsonObject currentFor(Access ctx, String use, String id) throws SQLException {
+        return currentFor(ctx, "HISTORY", use, id);
+    }
+
+    /** 派生写入须按原文或身份目录的实际引用目的核验同一版来源。 */
+    JsonObject currentFor(Access ctx, String purpose, String use, String id) throws SQLException {
         var args = new ArrayList<Object>();
-        String policy = Visibility.allowed(ctx, use, args);
+        String policy = allowed(ctx, purpose, use, args);
         args.add(id);
         var rows = store.rows(LATEST + " WHERE " + policy + " AND r.id=?", args.toArray());
         return rows.isEmpty() ? null : rows.getFirst();
@@ -262,7 +289,7 @@ AND json_extract(v.body,'$.channel.account_id')=? AND json_extract(v.body,'$.cha
         var ctx = Access.from(store, req);
         String purpose =
                 req.has("kind")
-                        ? one(req, "kind", "HISTORY", "SELF_IDENTITY", "SELF_HISTORY")
+                        ? one(req, "kind", "HISTORY", "SELF_IDENTITY", "SELF_HISTORY", "IDENTITY")
                         : "HISTORY";
         String use = use(req, purpose);
         int start = req.has("start") ? (int) number(req, "start", 0, Integer.MAX_VALUE) : 0;
@@ -420,12 +447,16 @@ ORDER BY v.seq DESC""",
                 "context kind query profile limit use subject_id predicate action_id as_of_valid"
                         + " as_of_known_seq before");
         var ctx = Access.from(store, req);
-        String purpose = one(req, "kind", "HISTORY", "SELF_HISTORY", "SELF_IDENTITY");
+        String purpose = one(req, "kind", "HISTORY", "SELF_HISTORY", "SELF_IDENTITY", "IDENTITY");
         String use = use(req, purpose);
         one(req, "profile", "QUICK", "THINKING");
         String query = str(req, "query", 256);
-        if (purpose.equals("SELF_IDENTITY") ? !query.isEmpty() : query.isBlank())
-            throw invalid("query");
+        boolean validQuery = switch (purpose) {
+            case "SELF_IDENTITY" -> query.isEmpty();
+            case "IDENTITY" -> query.isEmpty() || !query.isBlank();
+            default -> !query.isBlank();
+        };
+        if (!validQuery) throw invalid("query");
         int limit = (int) number(req, "limit", 1, purpose.equals("SELF_HISTORY") ? 16 : 50);
         if (!purpose.equals("HISTORY")) {
             for (String key :
@@ -437,6 +468,7 @@ ORDER BY v.seq DESC""",
                             "as_of_known_seq")) if (req.has(key)) throw invalid(key);
         }
         String before = req.has("before") ? time(req, "before") : "9999-12-31T23:59:59.999999999Z";
+        if (purpose.equals("IDENTITY")) return identityDirectory(ctx, query, before, limit);
         if (purpose.equals("SELF_HISTORY") && !req.has("before")) throw invalid("before");
         String at = req.has("as_of_valid") ? time(req, "as_of_valid") : utc(Instant.now());
         long head = store.head(),
@@ -492,6 +524,36 @@ ORDER BY v.seq DESC""",
         String state = items.isEmpty() ? "NOT_FOUND" : direct ? "DIRECT" : "INFERRED";
         if (conflicting) state = "CONFLICT";
         else if (!completed.containsAll(attempts)) state = "INCOMPLETE";
+        return recallResult(items, state);
+    }
+
+    /** 同一账号先核对所有有效称呼，再按号或完整名称选取。排序和 limit 只应用于核验完成的账号。 */
+    private JsonObject identityDirectory(Access ctx, String query, String before, int limit) throws SQLException {
+        var items = new JsonArray();
+        if (visibility.sessionIsolation()) return recallResult(items, "NOT_FOUND");
+        var rows = store.rows("""
+                WITH directory AS (
+                    SELECT r.id,r.conversation,r.kind,r.status,v.revision,v.occurred,v.body,v.seq,
+                           json_extract(v.body,'$.identity.account_id') AS account,
+                           json_extract(v.body,'$.identity.name') AS name
+                    FROM records r JOIN revisions v ON v.record_id=r.id AND v.revision=r.revision
+                    WHERE %s AND r.status='ONLINE'),
+                accounts AS (
+                    SELECT account,MAX(CASE WHEN occurred<? THEN seq END) AS latest,COUNT(DISTINCT name) AS names
+                    FROM directory GROUP BY account HAVING ?='' OR account=? OR MAX(occurred<? AND name=?)=1)
+                SELECT d.*,a.names,MAX(a.names) OVER () AS most_names FROM accounts a
+                JOIN directory d ON d.account=a.account AND d.seq=a.latest
+                ORDER BY (a.names>1),d.seq DESC,d.id LIMIT ?
+                """.formatted(CONFIRMED_IDENTITY), before, query, query, before, query, limit);
+        if (rows.isEmpty()) return recallResult(items, "NOT_FOUND");
+        for (var row : rows)
+            if (num(row, "names") == 1)
+                items.add(item(ctx, row, "IDENTITY", "LOCAL", 0, 2048, "L1", before));
+        return recallResult(items, num(rows.getFirst(), "most_names") > 1 ? "CONFLICT" : "DIRECT");
+    }
+
+    /** 各读取目的共同使用权威快照水位和证据评估格式。 */
+    private JsonObject recallResult(JsonArray items, String state) throws SQLException {
         var out = store.snapshot();
         out.add("items", items);
         out.add(

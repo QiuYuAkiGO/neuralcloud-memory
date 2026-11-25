@@ -10,6 +10,7 @@ import java.util.*;
 /** Memory 权威整理入口。批次、档案、来源依赖和覆盖回执均由调用方所在的单写事务保护。 */
 final class Dreaming {
     private final Store store;
+    private final Reader reader;
     private final String home;
     private static final String POSITION = "stream_id policy_version after through";
     private static final String PROFILE_ROWS =
@@ -27,8 +28,10 @@ OR EXISTS (SELECT 1 FROM visibility_grants g WHERE g.record_id=r.id AND g.revisi
 AND g.target=? AND g.use='CITE' AND g.status='ACTIVE'))
 """;
 
-    Dreaming(Store store) {
+    /** 对外导出沿用当前服务的受众读取策略，内部取证由 ELIGIBLE 校验整理范围。 */
+    Dreaming(Store store, Reader reader) {
         this.store = store;
+        this.reader = reader;
         home = "dreaming:" + store.character;
     }
 
@@ -369,7 +372,6 @@ OR json_extract(e.value,'$.topic')=p.subject) ORDER BY p.kind,p.subject
         boolean export = home.equals(ctx.scope());
         if (export) internal(ctx, "ORCHESTRATOR");
         var profiles = new JsonArray();
-        var reader = new Reader(store);
         for (var row : store.rows(PROFILE_ROWS + " WHERE p.active=1 ORDER BY p.kind,p.subject")) {
             var profile = parse(get(row, "body"));
             boolean visible = true;

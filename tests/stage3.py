@@ -85,7 +85,8 @@ def chat(run, prompts):
 
 def replay(mode, baseline, do_chat):
     """在隔离运行目录中执行单个检索模式的完整回放：灌入语料、冷/热轮召回计时、在线对照组与可选首字延迟测量。"""
-    run = Run(ROOT.parent / "neuralcloud-harness")
+    # 冻结的 P1 服务自带会话隔离。后续版本为同一套语料显式选择隔离。
+    run = Run(ROOT.parent / "neuralcloud-harness", session_isolation=None if mode == "P1" else "true")
     try:
         if mode == "P1":
             # P1 基线强制校验两个历史 worktree 的精确 Git 提交哈希，保证跨阶段对照实验可复现。
@@ -104,6 +105,7 @@ def replay(mode, baseline, do_chat):
                 if not path.is_file():
                     raise ValueError("Build the two recorded P1 commits before replay: " + str(path))
                 setattr(run, field, path)
+            run.spec = json.loads((baseline / "memory/contracts/v2/openapi.json").read_text(encoding="utf-8"))
         else:
             with (run.out / "memory.properties").open("a", encoding="utf-8") as f:
                 f.write("organizeIntervalSeconds=0\nretrievalMode=" + mode.split("+")[0] + "\n")

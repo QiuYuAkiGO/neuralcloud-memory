@@ -50,7 +50,8 @@ def verify(run):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--harness", type=Path, default=ROOT.parent / "neuralcloud-harness")
-    run = ServicePair(parser.parse_args().harness)
+    # 在隔离模式单独验证同群成员凭据授予的通知读取权。
+    run = ServicePair(parser.parse_args().harness, session_isolation="true")
     try:
         verify(run)
     finally:
