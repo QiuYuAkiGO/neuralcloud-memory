@@ -168,6 +168,33 @@ class GroupHistory(DreamingCase):
             item = by_id[refs[row[0]]["record_id"]]
             self.assertTrue({"card", "nickname", "channel_name_ref"}.isdisjoint(item), item)
 
+    def test_archive_record_markers_are_32_hex_and_protocol_digests_are_full_sha256(self):
+        """复现旧写入方的两种标识长度。错误标记不能签原话或名片，原始协议的摘要也不能截短。"""
+        def pointer(row, index, value):
+            row[1]["provenance"]["external_refs"][index] = value
+            row[1]["aliases"][index] = value
+
+        first = history_row("真实标记形状", GID, AUTHOR, "871", "我把纸张铺好了。")
+        card = history_row("真实资料标记", GID, AUTHOR, "871", "蒲溪", card=True)
+        bare = history_row("只有真实原话", GID, OTHER, "872", "我来清点曲谱。")
+        bad_card = history_row("资料标记过长", GID, OTHER, "872", "不能签发的群名片", card=True)
+        pointer(bad_card, 0, "qq-profile:" + digest("64位的伪标记"))
+        rows = [first, card, bare, bad_card]
+        for label, marker in (("过短", "a" * 31), ("过长", "a" * 33), ("完整哈希冒充标记", "a" * 64),
+                              ("非十六进制", "g" + "a" * 31)):
+            row = history_row(label, GID, AUTHOR, str(880 + len(rows)), "这是标记无效的一条记录。")
+            pointer(row, 0, "qq-visual:" + marker)
+            rows.append(row)
+        short_packet = history_row("协议指纹过短", GID, AUTHOR, "899", "这条记录缺少完整协议摘要。")
+        pointer(short_packet, 1, "qq-protocol://sha256/" + "b" * 32)
+        rows.append(short_packet)
+        refs = history_refs(self.service, self.start(*rows), rows)
+        page = self.page(GROUP)
+        self.assertEvidence(page, refs[first[0]], refs[bare[0]])
+        issued = {e["record_id"]: e for e in page["evidence"]}
+        self.assertEqual(issued[refs[first[0]]["record_id"]]["channel_name_ref"], refs[card[0]])
+        self.assertNotIn("channel_name_ref", issued[refs[bare[0]]["record_id"]])
+
     def test_group_scope_must_have_one_bot_and_stops_authorizing_after_removal(self):
         """旧群号不推测机器人；只有唯一获准映射能写、读，撤去该群后其他群的档案仍可见。"""
         local = history_row("本群原话", GID, AUTHOR, "991", "我负责本群的签到。")

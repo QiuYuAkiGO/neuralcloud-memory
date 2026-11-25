@@ -26,9 +26,9 @@ def history_row(key, group_id, sender_id, message_id, content, *, card=False, di
     protocol = "qq-protocol://sha256/" + msg_digest
     if card:
         content = encoded({"display_name_source": display_name_source, "observed_display_name": content})
-        pointers = ["qq-profile:" + digest(key), "qq-protocol://sha256/" + digest("profile:" + key), protocol]
+        pointers = ["qq-profile:" + digest(key)[:32], "qq-protocol://sha256/" + digest("profile:" + key), protocol]
     else:
-        pointers = ["qq-visual:" + digest(key), protocol,
+        pointers = ["qq-visual:" + digest(key)[:32], protocol,
                     f"qq-protocol-message:{group_id}:{sender_id}:{message_id}"]
     snapshot = digest("合成群消息迁移快照")
     payload = dict(schema_version=1, character_id="misty-dev", source_instance="legacy:" + snapshot[:32],
