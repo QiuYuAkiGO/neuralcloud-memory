@@ -13,9 +13,9 @@ FIRST = "我也叫青笺。"
 SECOND = "今天先排练第二段。"
 
 
-class IdentityBackfill(DreamingCase):
+class LegacyPeopleCase(DreamingCase):
     def setUp(self):
-        """旧版先确认覆盖两个 QQ 事件并发布主档，升级前留存原命令和逐字段回执。"""
+        """正式旧版从指定 JAR 启动，配置里仅人工确认柳舟对应的 QQ。"""
         self.service = ServicePair(ROOT.parent / "neuralcloud-harness", session_isolation="true")
         self.addCleanup(self.stop_memory)
         self.current_jar = self.service.memjar
@@ -25,13 +25,6 @@ class IdentityBackfill(DreamingCase):
         with (self.service.out / "memory.properties").open("a", encoding="utf-8") as settings:
             settings.write("dreamingPeopleFile=people.json\n")
         self.assertNotIn("dreaming_qq_aliases", self.service.memory()["capabilities"])
-        self.first = self.qq("701", FIRST)
-        self.second = self.qq("702", SECOND)
-        old_batch = self.batch(GROUP)
-        self.old_profile = change("person", "柳舟", "我记得柳舟先排练第二段。", [self.second])
-        self.old_command = publication(old_batch, "v6-profile", [self.old_profile])
-        self.old_receipt = self.post("commit", self.old_command)
-        self.restart()
 
     def post(self, route, body, expected=200):
         """透传各版本各自的公开 JSON，包括未声明格式 7 扩展字段的真实旧版命令。"""
@@ -42,14 +35,27 @@ class IdentityBackfill(DreamingCase):
         self.service.memjar = self.current_jar
         self.assertIn("dreaming_qq_aliases", self.service.memory()["capabilities"])
 
-    def qq(self, number, content):
+    def qq(self, number, content, sender=AUTHOR):
         return self.ingest("group-" + number, content, GROUP, channel=dict(platform="qq", type="qq_group",
-                           account_id=ACCOUNT, sender_id=AUTHOR, conversation_id=GROUP, message_id=number))
+                           account_id=ACCOUNT, sender_id=sender, conversation_id=GROUP, message_id=number))
 
     def subject_for(self, page, source):
         evidence, = [e for e in page["evidence"] if ref(e) == source]
         person, = [p for p in page["persons"] if p["person_id"] == evidence["speaker_person_id"]]
         return person
+
+
+class IdentityBackfill(LegacyPeopleCase):
+    def setUp(self):
+        """旧版先覆盖两个 QQ 事件并发布主档，留存原命令和回执后原地升级。"""
+        super().setUp()
+        self.first = self.qq("701", FIRST)
+        self.second = self.qq("702", SECOND)
+        old_batch = self.batch(GROUP)
+        self.old_profile = change("person", "柳舟", "我记得柳舟先排练第二段。", [self.second])
+        self.old_command = publication(old_batch, "v6-profile", [self.old_profile])
+        self.old_receipt = self.post("commit", self.old_command)
+        self.restart()
 
     def test_backfill_persists_across_restart_without_rewinding_normal_progress(self):
         """中断后延续独立回扫页；回放两代回执既不重发首条学习也不改变主档和实时水位。"""
