@@ -32,6 +32,12 @@ class LegacyProfileMerge(LegacyPeopleCase):
     def profiles(self):
         return self.post("profiles", {"context": internal()})["profiles"]
 
+    def retract_bridge(self, source):
+        """仅撤回本人认领别称的那条原话，各旧档用于描述生活习惯的来源仍然有效。"""
+        self.service.api("corrections", dict(context=context(GROUP), source_instance=INSTANCE,
+                         event_id="undo-" + source["record_id"], record_id=source["record_id"],
+                         expected_revision=source["revision"], operation="RETRACT", reason="发言人撤回别称说明"))
+
     def test_confirmed_name_unites_old_self_descriptions_until_its_only_bridge_is_withdrawn(self):
         """别称档有本人的明确旧自述但没有可信账号。撤回唯一桥接后两份有据认识各自恢复。"""
         timing = self.qq("801", "我会在排练前校准节拍器。")
@@ -48,9 +54,7 @@ class LegacyProfileMerge(LegacyPeopleCase):
                 self.assertIn(original[part], merged[part])
         self.assertTrue(all(r in merged["source_refs"] for r in (timing, archive)))
 
-        self.service.api("corrections", dict(context=context(GROUP), source_instance=INSTANCE, event_id="undo-bridge",
-                         record_id=bridge["record_id"], expected_revision=bridge["revision"], operation="RETRACT",
-                         reason="原发件人撤回别称说明"))
+        self.retract_bridge(bridge)
         restored = {p["subject"]: p for p in self.profiles()}
         self.assertEqual(set(restored), {"柳舟", "青笺"})
         for original in (primary, former):
@@ -59,6 +63,52 @@ class LegacyProfileMerge(LegacyPeopleCase):
             self.assertEqual(current["source_refs"], original["source_refs"])
         self.assertEqual(restored["柳舟"]["person_id"], pid)
         self.assertNotEqual(restored["青笺"].get("person_id"), pid)
+
+    def test_direct_qq_habit_stays_with_its_speaker_when_the_alias_is_withdrawn(self):
+        """旧称只出现在文件标题。本人 QQ 对自己习惯的直述可独立归属，称呼撤回后仍在主档。"""
+        first = self.qq("821", "我总把镜头布放在摄影包左边。")
+        habit = self.qq("822", "我每次上山拍照前，都会给备用电池贴上日期。")
+        primary = change("person", "柳舟", "我记得柳舟收纳镜头布的位置。", [first])
+        former = change("person", "野渡", "我记得对方拍照前会给备用电池贴上日期。", [habit])
+        self.upgrade_profiles(primary, former)
+
+        pid, bridge = self.acknowledge("823", "野渡")
+
+        def check_owner():
+            owned = [p for p in self.profiles() if p.get("person_id") == pid]
+            self.assertEqual([p["subject"] for p in owned], ["柳舟"])
+            main, = owned
+            self.assertIn(primary["text"], main["text"])
+            self.assertIn(former["text"], main["text"])
+            self.assertCountEqual(main["source_refs"], [first, habit])
+
+        check_owner()
+        self.retract_bridge(bridge)
+        check_owner()
+
+    def test_a_forwarded_self_description_and_another_speaker_do_not_become_the_qq_owners_habits(self):
+        """分别检验本人转述第三人的第一人称、其他 QQ 自述。撤回后两种习惯各留其旧档。"""
+        first = self.qq("831", "我出门前会检查雨量计。")
+        forwarded = self.qq("832", "我给你转述小满的原话：“我习惯把票根夹在末页。”这是她的习惯。")
+        other = self.qq("833", "我自己一直用浅色布袋收纳胶卷。", sender=OTHER)
+        primary = change("person", "柳舟", "我记得柳舟会在出发前检查雨量计。", [first])
+        clipping = change("person", "潮影", "我读到那个人把票根夹在末页的习惯。", [forwarded])
+        bag = change("person", "晚渡", "我记得对方用浅色布袋收纳胶卷。", [other])
+        self.upgrade_profiles(primary, clipping, bag)
+
+        pid, first_bridge = self.acknowledge("834", "潮影")
+        _, second_bridge = self.acknowledge("835", "晚渡")
+        self.retract_bridge(first_bridge)
+        self.retract_bridge(second_bridge)
+        profiles = {p["subject"]: p for p in self.profiles()}
+        self.assertEqual(set(profiles), {"柳舟", "潮影", "晚渡"})
+        self.assertEqual(profiles["柳舟"]["person_id"], pid)
+        self.assertNotEqual(profiles["潮影"].get("person_id"), pid)
+        self.assertNotEqual(profiles["晚渡"].get("person_id"), pid)
+        for original in (primary, clipping, bag):
+            current = profiles[original["subject"]]
+            self.assertEqual(current["text"], original["text"])
+            self.assertEqual(current["source_refs"], original["source_refs"])
 
     def test_foreign_quotation_and_oversized_merge_preserve_the_old_profiles(self):
         """异账号转引和无关说话人的旧档不得误归；即使另一旧档可归属，超长时也须完整保留。"""
