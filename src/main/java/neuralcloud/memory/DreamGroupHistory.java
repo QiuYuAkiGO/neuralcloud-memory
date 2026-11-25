@@ -18,7 +18,8 @@ final class DreamGroupHistory {
     private static final Pattern SHA256 = Pattern.compile("[0-9a-f]{64}");
     private static final Pattern OLD_ID = Pattern.compile("shared-memory:[0-9a-f]{64}");
     private static final String PROTOCOL = "qq-protocol://sha256/";
-    private static final Pattern POINTER = Pattern.compile("qq-(visual|profile):[0-9a-f]{64}");
+    // 旧写入方给观察或资料本身的短标识是 32 位。它指向的底层 QQ 协议包另有完整 SHA-256。
+    private static final Pattern POINTER = Pattern.compile("qq-(visual|profile):[0-9a-f]{32}");
     private static final Pattern MESSAGE = Pattern.compile("qq-protocol-message:(" + GROUP + "):(" + QQ + "):(-?[0-9]+)");
     private static final Pattern MEDIA = Pattern.compile(
             "【图片[1-9][0-9]*】|\\[(?:(?:图片|引用消息|视频|语音|文件|转发消息)(?:[\\s:：][^]\\r\\n]*)?|未解析的消息附件|QQ表情)\\]");
