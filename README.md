@@ -4,7 +4,15 @@ Java 21 记忆服务负责原文与修订、派生来源、全文检索、持久
 
 ## Dreaming 档案
 
-启用 Dreaming 的 Harness 使用 `/v2/dreaming/batch` 领取一手材料，通过 `commit` 和 `receipt` 推进独立覆盖水位。`/v2/dreaming/profiles` 按受众复核每条依据的 CITE 权限。启动时自动将既有 v2 至 v4 角色库迁移到 schema 5，保留原始流与 Master 印象。构建两仓后运行 `python -X utf8 tests/dreaming.py` 可复验整理、授权、修订、撤回与重启。[HTTP 契约](contracts/v2/openapi.json)
+启用 Dreaming 的 Harness 使用 `/v2/dreaming/batch` 领取一手材料，通过 `commit` 和 `receipt` 推进独立覆盖水位。`/v2/dreaming/profiles` 按受众复核每条依据的 CITE 权限。启动时自动将既有 v2 至 v5 角色库迁移到 schema 6，保留原始流、档案历史、回执与 Master 印象。[HTTP 契约](contracts/v2/openapi.json)
+
+要归并已确认属于同一人的旧档，在 Memory 配置中设置 `dreamingPeopleFile=dreaming-people.json`。文件路径相对于该配置文件，内容采用 UTF-8。例如下列绑定让“小雾”和“Misty”共用“小雾”档案。普通人物可选填 `qq_sender_id`（QQ 号字符串）来识别发件人。`self: true` 标记本角色。账号与旧私聊标题保存在部署方的私有文件中。
+
+```json
+{"character_id":"misty","people":[{"subject":"小雾","aliases":["Misty"],"self":true}]}
+```
+
+首次载入会在启动事务中保存绑定，归并仍然有效的正文、范围、理由与去重后的一手依据。同一绑定可重复载入，后续启动也可省略配置文件。冲突的绑定或超过单档契约上限的归并会说明字段并回滚。批次中的 `person_names` 只包含与本批相关的称呼。模型对人物的修订沿用主称呼及其版号。构建后分别运行 `python -X utf8 tests/dreaming.py` 和 `python -X utf8 tests/dreaming_people.py` 可复验归并、重启、撤回和受众权限。
 
 ## 构建和复跑首版验收
 

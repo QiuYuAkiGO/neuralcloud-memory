@@ -1257,7 +1257,8 @@
           "speaker": {"type":"string","minLength":1,"maxLength":256},
           "topic": {"type":"string","minLength":1,"maxLength":128},
           "source_venue": {"type":"string","minLength":1,"maxLength":256},
-          "sender_id": {"type":"string","minLength":1,"maxLength":128}
+          "sender_id": {"type":"string","minLength":1,"maxLength":128},
+          "speaker_subject": {"type":"string","minLength":1,"maxLength":128,"description":"由角色本人或 QQ 发件人绑定确认的发言者主称呼"}
         },
         "required": ["record_id","revision","conversation_id","kind","content","occurred_at"]
       },
@@ -1270,7 +1271,8 @@
           "after": {"type":"integer","minimum":0},
           "through": {"type":"integer","minimum":0},
           "evidence": {"type":"array","items":{"$ref":"#/components/schemas/DreamEvidence"},"minItems":0},
-          "profiles": {"type":"array","items":{"oneOf":[{"$ref":"#/components/schemas/DreamProfile"},{"$ref":"#/components/schemas/DreamIdentity"}]},"minItems":0}
+          "profiles": {"type":"array","items":{"oneOf":[{"$ref":"#/components/schemas/DreamProfile"},{"$ref":"#/components/schemas/DreamIdentity"}]},"minItems":0},
+          "person_names": {"type":"array","description":"本批相关的已确认人物称呼","items":{"type":"object","additionalProperties":false,"required":["subject","aliases"],"properties":{"subject":{"type":"string","minLength":1,"maxLength":128},"aliases":{"type":"array","uniqueItems":true,"items":{"type":"string","minLength":1,"maxLength":128}}}}}
         },
         "required": ["stream_id","policy_version","after","through","evidence","profiles"]
       },

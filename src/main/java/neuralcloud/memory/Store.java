@@ -26,6 +26,7 @@ final class Store implements AutoCloseable {
     final Connection db;
     /** 绑定的角色主体 ID、当前数据历史流 ID 与唯一允许的写入方实例名。 */
     final String character, stream, writer;
+    final DreamPeople dreamPeople;
     private final FileChannel lock;
 
     /**
@@ -36,6 +37,11 @@ final class Store implements AutoCloseable {
      * @param writer    允许提交写命令的 source_instance 标识
      */
     Store(Path directory, String character, String writer) throws Exception {
+        this(directory, character, writer, null);
+    }
+
+    /** 人物绑定、既有档案归并和格式升级共用启动事务，任何一步失败都不发布新状态。 */
+    Store(Path directory, String character, String writer, Path peopleFile) throws Exception {
         this.character = character;
         this.writer = writer;
         Files.createDirectories(directory);
@@ -66,7 +72,7 @@ final class Store implements AutoCloseable {
                         .isEmpty()) throw new IOException("unrecognized existing database");
                 schema("/schema.sql");
                 update("INSERT INTO meta VALUES(?,?)", character, UUID.randomUUID().toString());
-            } else if (version < 2 || version > 5)
+            } else if (version < 2 || version > 6)
                 throw new IOException("unsupported schema version " + version);
             // 旧库原地增加授权索引（v2 -> v3），保留原有流标识、版本与消费水位。
             if (version < 3) schema("/visibility.sql");
@@ -97,11 +103,13 @@ final class Store implements AutoCloseable {
             }
             // v4 -> v5 增加独立档案、覆盖水位与回执，不改写旧 Master 印象或原始流。
             if (version < 5) schema("/dreaming.sql");
+            if (version < 6) schema("/dreaming-people.sql");
             var metadata = rows("SELECT * FROM meta").getFirst();
             // 校验目录归属的角色主体，防止错配配置把 A 角色的数据挂到 B 角色进程。
             if (!character.equals(get(metadata, "character_id")))
                 throw new IOException("character_id mismatch");
             stream = get(metadata, "stream_id");
+            dreamPeople = DreamPeople.load(this, peopleFile);
             // 探测 FTS5 扩展是否正常加载且索引表可读，确认就绪后再暴露 HTTP 端口。
             rows("SELECT rowid FROM search WHERE search MATCH 'ready' LIMIT 1");
             db.commit();

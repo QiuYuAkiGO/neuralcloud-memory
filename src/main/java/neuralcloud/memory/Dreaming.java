@@ -13,7 +13,7 @@ final class Dreaming {
     private final Reader reader;
     private final String home;
     private static final String POSITION = "stream_id policy_version after through";
-    private static final String PROFILE_ROWS =
+    static final String PROFILE_ROWS =
             """
 SELECT p.kind,p.subject,p.version,p.active,v.body FROM dream_profiles p JOIN dream_revisions v
 USING(kind,subject,version)
@@ -143,6 +143,7 @@ AND g.target=? AND g.use='CITE' AND g.status='ACTIVE'))
         var channel = body.getAsJsonObject("channel");
         if (channel != null && channel.has("sender_id"))
             e.add("sender_id", channel.get("sender_id"));
+        store.dreamPeople.annotateSpeaker(e, channel);
         return e;
     }
 
@@ -150,6 +151,7 @@ AND g.target=? AND g.use='CITE' AND g.status='ACTIVE'))
     private JsonObject material(long policy, long after, long through) throws SQLException {
         var evidence = new LinkedHashMap<String, JsonObject>();
         var profiles = new JsonArray();
+        var personNames = new TreeSet<String>();
         if (through > after) {
             var touched =
                     store.rows(
@@ -166,15 +168,20 @@ AND g.target=? AND g.use='CITE' AND g.status='ACTIVE'))
             }
             // 直接依赖此次变更，或人物/主题名称出现在一手材料中时才取相关旧版。
             var firsthand = List.copyOf(evidence.values());
+            personNames.addAll(store.dreamPeople.mentioned(firsthand));
             var related =
                     store.rows(
                             PROFILE_ROWS
                                     + """
-WHERE EXISTS (SELECT 1 FROM dream_sources d WHERE d.kind=p.kind AND d.subject=p.subject
+WHERE (p.kind<>'person' OR NOT EXISTS (SELECT 1 FROM dream_person_names n
+WHERE n.name=p.subject AND n.name<>n.subject)) AND (
+(p.kind='person' AND p.subject IN (SELECT value FROM json_each(?))) OR
+EXISTS (SELECT 1 FROM dream_sources d WHERE d.kind=p.kind AND d.subject=p.subject
 AND d.record_id IN (SELECT value FROM json_each(?))) OR EXISTS (SELECT 1 FROM json_each(?) e
 WHERE instr(json_extract(e.value,'$.content'),p.subject)>0 OR json_extract(e.value,'$.speaker')=p.subject
-OR json_extract(e.value,'$.topic')=p.subject) ORDER BY p.kind,p.subject
+OR json_extract(e.value,'$.topic')=p.subject)) ORDER BY p.kind,p.subject
 """,
+                            JSON.toJson(personNames),
                             JSON.toJson(ids),
                             JSON.toJson(firsthand));
             for (var profile : related) {
@@ -192,6 +199,7 @@ OR json_extract(e.value,'$.topic')=p.subject) ORDER BY p.kind,p.subject
                 // 全部原依据已撤回时，若本批独立材料重新提及同一主题，仅交付版本身份。
                 String subject = get(profile, "subject");
                 if (supported
+                        || (get(profile, "kind").equals("person") && personNames.contains(subject))
                         || firsthand.stream()
                                 .anyMatch(
                                         e ->
@@ -201,7 +209,8 @@ OR json_extract(e.value,'$.topic')=p.subject) ORDER BY p.kind,p.subject
                                                                         get(e, "speaker")))
                                                         || (e.has("topic")
                                                                 && subject.equals(
-                                                                        get(e, "topic")))))
+                                                                        get(e, "topic"))))) {
+                    if (get(profile, "kind").equals("person")) personNames.add(subject);
                     profiles.add(
                             num(profile, "active") == 1
                                     ? current
@@ -212,9 +221,10 @@ OR json_extract(e.value,'$.topic')=p.subject) ORDER BY p.kind,p.subject
                                             get(profile, "subject"),
                                             "version",
                                             num(profile, "version")));
+                }
             }
         }
-        return obj(
+        var packet = obj(
                 "stream_id",
                 store.stream,
                 "policy_version",
@@ -227,6 +237,9 @@ OR json_extract(e.value,'$.topic')=p.subject) ORDER BY p.kind,p.subject
                 evidence.values(),
                 "profiles",
                 profiles);
+        var hints = store.dreamPeople.hints(personNames);
+        if (!hints.isEmpty()) packet.add("person_names", hints);
+        return packet;
     }
 
     /** 先按原命令查回执，再核对已发批次与当前证据。所有档案修订、覆盖和回执共同提交或回滚。 */
@@ -295,11 +308,10 @@ OR json_extract(e.value,'$.topic')=p.subject) ORDER BY p.kind,p.subject
         keys(change, "kind subject expected_version text scope reason source_refs");
         String kind = one(change, "kind", "person", "topic"),
                 subject = text(change, "subject", 128);
-        if (!identities.add(List.of(kind, subject))) throw invalid("changes.kind/subject");
+        if ((kind.equals("person") && store.dreamPeople.isAlias(subject))
+                || !identities.add(List.of(kind, subject))) throw invalid("changes.kind/subject");
         long expected = number(change, "expected_version", 0, Long.MAX_VALUE - 1);
-        if (!text(change, "text", 2048).startsWith("我")) throw invalid("text");
-        text(change, "scope", 512);
-        text(change, "reason", 1024);
+        checkBody(change);
         var refs = array(change, "source_refs", 1, 16);
         var seen = new HashSet<String>();
         for (var entry : refs) {
@@ -317,11 +329,24 @@ OR json_extract(e.value,'$.topic')=p.subject) ORDER BY p.kind,p.subject
                         subject);
         if ((rows.isEmpty() ? 0 : num(rows.getFirst(), "version")) != expected)
             throw conflict("REVISION_CONFLICT");
-        long next = expected + 1;
         var profile = change.deepCopy();
         profile.remove("expected_version");
-        profile.addProperty("version", next);
+        profile.addProperty("version", expected + 1);
         profile.addProperty("author", "DREAMING");
+        saveRevision(store, profile);
+    }
+
+    /** 归档正文和手工确认身份后的合并版本遵守相同的发布限制。 */
+    static void checkBody(JsonObject profile) {
+        if (!text(profile, "text", 2048).startsWith("我")) throw invalid("text");
+        text(profile, "scope", 512);
+        text(profile, "reason", 1024);
+    }
+
+    /** 版本正文和撤回依赖索引必须在同一事务内完成，供普通修订和旧人物归并共用。 */
+    static void saveRevision(Store store, JsonObject profile) throws SQLException {
+        String kind = get(profile, "kind"), subject = get(profile, "subject");
+        long next = num(profile, "version");
         store.update(
                 "INSERT INTO dream_profiles VALUES(?,?,?,1) ON CONFLICT(kind,subject) DO UPDATE SET"
                         + " version=excluded.version,active=1",
@@ -335,7 +360,7 @@ OR json_extract(e.value,'$.topic')=p.subject) ORDER BY p.kind,p.subject
                 next,
                 JSON.toJson(profile));
         store.update("DELETE FROM dream_sources WHERE kind=? AND subject=?", kind, subject);
-        for (var entry : refs) {
+        for (var entry : profile.getAsJsonArray("source_refs")) {
             var ref = entry.getAsJsonObject();
             store.update(
                     "INSERT INTO dream_sources VALUES(?,?,?,?)",
