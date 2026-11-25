@@ -19,16 +19,15 @@ final class DreamGroupProgress {
         return num(store.rows("SELECT enabled FROM dream_group_progress").getFirst(), "enabled") == 1;
     }
 
-    /** 范围变更由正常流从零重评。同范围重新启用时，补扫关闭期间正常流已确认的部分。 */
+    /** 范围变更由正常流从零重评。重新授权时旧档可能因停用退役，已覆盖群原话也须重新签发。 */
     static boolean enable(Store store, boolean requested, boolean scopesChanged) throws SQLException {
         boolean changed = requested != enabled(store);
         if (scopesChanged) {
             store.update("UPDATE dream_group_progress SET enabled=?,cursor=0,target=0", requested ? 1 : 0);
+        } else if (changed && requested) {
+            store.update("UPDATE dream_group_progress SET enabled=1,cursor=0,target=(SELECT covered FROM dream_state)");
         } else if (changed) {
-            store.update("""
-                    UPDATE dream_group_progress SET enabled=?,
-                      target=max(target,(SELECT covered FROM dream_state))
-                    """, requested ? 1 : 0);
+            store.update("UPDATE dream_group_progress SET enabled=0");
         }
         return changed;
     }
@@ -94,18 +93,11 @@ final class DreamGroupProgress {
     static void advance(Store store, String lane, long through) throws SQLException {
         if (LIVE.equals(lane)) {
             store.update("UPDATE dream_state SET covered=?,packet=NULL", through);
-            // 已开启并追平的群历史由正常流接续，关掉再开启也无需重复这一段。
-            store.update("UPDATE dream_group_progress SET cursor=?,target=? WHERE enabled=1 AND cursor=target",
-                    through, through);
         } else {
             store.update("UPDATE dream_state SET packet=NULL");
         }
         if (GROUP.equals(lane)) {
-            // 回扫结束时，其上界之后是开启期间已确认的正常流；一并记为已覆盖。
-            store.update("""
-                    UPDATE dream_group_progress SET cursor=CASE WHEN ?=target THEN (SELECT covered FROM dream_state)
-                      ELSE ? END, target=CASE WHEN ?=target THEN (SELECT covered FROM dream_state) ELSE target END
-                    """, through, through, through);
+            store.update("UPDATE dream_group_progress SET cursor=?", through);
         }
         if (IDENTITY.equals(lane)) {
             store.update("UPDATE dream_identity_progress SET cursor=?,last_lane=?", through, lane);
