@@ -36,6 +36,18 @@ SELECT r.id,r.conversation,r.kind,r.status,v.revision,v.occurred,v.body FROM rec
 JOIN revisions v ON v.record_id=r.id AND v.seq=(
   SELECT max(prev.seq) FROM revisions prev WHERE prev.record_id=r.id AND prev.seq<=?) """;
 
+    /**
+     * 已知记录的查询在当前语句内提供同名的依赖视图。视图的三列与整库视图一致，
+     * 从这条记录的直接来源开始递归，供原有授权谓词检查所有上游的精确修订。
+     * 第一个占位符始终是目标记录 ID。
+     */
+    private static final String RECORD_DEPENDENCIES = """
+            WITH RECURSIVE evidence_dependencies(derived,source,revision) AS (
+                SELECT derived,source,revision FROM sources WHERE derived=?
+                UNION
+                SELECT d.derived,s.source,s.revision FROM evidence_dependencies d JOIN sources s ON s.derived=d.source)
+            """;
+
     private final CellSearch.Mode mode;
 
     final Visibility visibility;
@@ -79,11 +91,10 @@ JOIN revisions v ON v.record_id=r.id AND v.seq=(
     private List<JsonObject> refs(JsonObject row) throws SQLException {
         var sources =
                 store.rows(
-                        """
-WITH RECURSIVE deps(id,rev) AS (SELECT source,revision FROM sources WHERE derived=?
-UNION SELECT s.source,s.revision FROM sources s JOIN deps d ON s.derived=d.id)
-SELECT id AS record_id,rev AS revision FROM deps WHERE NOT EXISTS(SELECT 1 FROM sources WHERE derived=id)
-ORDER BY id""",
+                        RECORD_DEPENDENCIES + """
+                            SELECT d.source AS record_id,d.revision FROM evidence_dependencies d
+                            WHERE NOT EXISTS (SELECT 1 FROM sources s WHERE s.derived=d.source)
+                            ORDER BY d.source""",
                         get(row, "id"));
         return sources.isEmpty() ? List.of(ref(get(row, "id"), num(row, "revision"))) : sources;
     }
@@ -92,10 +103,9 @@ ORDER BY id""",
     String dependencyExpiry(String id) throws SQLException {
         var rows =
                 store.rows(
-                        """
-SELECT min(json_extract(v.body,'$.assertion.valid_until')) expiry
-FROM evidence_dependencies d JOIN revisions v ON v.record_id=d.source AND v.revision=d.revision
-WHERE d.derived=?""",
+                        RECORD_DEPENDENCIES + """
+                            SELECT min(json_extract(v.body,'$.assertion.valid_until')) expiry
+                            FROM evidence_dependencies d JOIN revisions v ON v.record_id=d.source AND v.revision=d.revision""",
                         id);
         var value = rows.getFirst().get("expiry");
         return value.isJsonNull() ? null : value.getAsString();
@@ -162,9 +172,8 @@ WHERE d.derived=?""",
         if (sharingDependent || (purpose.equals("HISTORY")
                 && (!get(row, "conversation").equals(ctx.scope())
                         || !store.rows(
-                                        "SELECT 1 FROM evidence_dependencies d JOIN records p ON"
-                                                + " p.id=d.source WHERE d.derived=? AND"
-                                                + " p.conversation<>? LIMIT 1",
+                                        RECORD_DEPENDENCIES + "SELECT 1 FROM evidence_dependencies d JOIN records p"
+                                                + " ON p.id=d.source WHERE p.conversation<>? LIMIT 1",
                                         get(row, "id"),
                                         ctx.scope())
                                 .isEmpty()))) out.addProperty("grant_dependent", true);
@@ -302,6 +311,7 @@ AND json_extract(v.body,'$.channel.account_id')=? AND json_extract(v.body,'$.cha
             keys(t, "record_id revision");
             String id = id(t, "record_id");
             var args = new ArrayList<Object>();
+            args.add(id);
             String join = LATEST;
             if (t.has("revision")) {
                 long revision = number(t, "revision", 1, Long.MAX_VALUE);
@@ -315,7 +325,8 @@ AND json_extract(v.body,'$.channel.account_id')=? AND json_extract(v.body,'$.cha
             }
             String policy = allowed(ctx, purpose, use, args);
             args.add(id);
-            var rows = store.rows(join + " WHERE " + policy + " AND r.id=?", args.toArray());
+            // 每个 target 只遍历自己的来源链，原受众、历史修订及撤回判定继续使用相同谓词。
+            var rows = store.rows(RECORD_DEPENDENCIES + join + " WHERE " + policy + " AND r.id=?", args.toArray());
             if (rows.isEmpty()) {
                 items.add(obj("status", "NOT_FOUND", "record_id", id));
                 continue;
