@@ -42,6 +42,14 @@ class QQAliases(DreamingCase):
     def profiles(self, room=None):
         return self.post("profiles", {"context": internal() if room is None else audience(room)})["profiles"]
 
+    def configure_person(self, binding):
+        """为下次正式启动设置人工绑定，返回原配置供拒绝启动后的同库恢复。"""
+        settings = self.service.out / "memory.properties"
+        original = settings.read_text(encoding="utf-8")
+        dump(settings.with_name("people.json"), {"character_id": "misty-dev", "people": [binding]})
+        settings.write_text(original + "dreamingPeopleFile=people.json\n", encoding="utf-8")
+        return original
+
     def withdraw(self, source, room):
         """在原会话更正入口撤回指定修订。"""
         self.service.api("corrections", dict(context=audience(room, "ROUTER"), source_instance=INSTANCE,
@@ -66,6 +74,10 @@ class QQAliases(DreamingCase):
         forged = dict(item, source_refs=[dict(naming, quote="我叫穗宁，请以后只用这个称呼。")])
         self.post("commit", dict(command, event_id="invented-quote", name_claims=[forged]), 422)
         self.assertEqual(self.receipt("invented-quote")["status"], "NOT_FOUND")
+        # 已签发真实 QQ 人物的消息不能通过省略两个扩展字段，另走无身份的同名写入。
+        unnamed = {k: v for k, v in impression.items() if k != "person_id"}
+        self.post("commit", publication(page, "missing-person", [unnamed]), 422)
+        self.assertEqual(self.receipt("missing-person")["status"], "NOT_FOUND")
         self.assertEqual(self.profiles(), [])
         self.assertEqual(self.batch(GROUP, dm), page)
 
@@ -294,10 +306,7 @@ class QQAliases(DreamingCase):
 
         # 下次启动由维护者确认其中一人的主名，已有 QQ、档案和来源继续用原身份。
         self.stop_memory()
-        dump(self.service.out / "people.json", {"character_id": "misty-dev", "people": [
-             {"subject": "程雨", "aliases": ["雨铃"], "qq_sender_id": OTHER}]})
-        with (self.service.out / "memory.properties").open("a", encoding="utf-8") as settings:
-            settings.write("dreamingPeopleFile=people.json\n")
+        self.configure_person({"subject": "程雨", "aliases": ["雨铃"], "qq_sender_id": OTHER})
         self.service.memory()
         ar = self.qq(AUTHOR, "703", "以后无论在哪里都请叫我晚晴。")
         br = self.qq(OTHER, "704", "以后无论在哪里都请叫我苇竹。")
@@ -306,6 +315,56 @@ class QQAliases(DreamingCase):
                                            claim(speaker(rename, br), "苇竹", "PREFERRED_NAME", br)])
         self.assertCountEqual([(p["person_id"], p["subject"]) for p in self.profiles()],
                               [(auto["person_id"], "晚晴"), (fixed["person_id"], "程雨")])
+
+    def test_manual_primary_reuses_the_existing_qq_person_and_profile(self):
+        """一个账号原有自动主名时，维护者可以指定主称呼，新旧称呼和原正文仍归原人物。"""
+        intro = self.qq(AUTHOR, "721", "我叫柳弦。")
+        page = self.batch(GROUP)
+        who = speaker(page, intro)
+        original = subject_change(who, "柳弦", "我听到这位成员做了自我介绍。", intro)
+        self.publish(page, "known-qq", [claim(who, "柳弦", "SELF_NAME", intro)], [original])
+        self.stop_memory()
+        self.configure_person({"subject": "阿弦", "aliases": ["柳弦"], "qq_sender_id": AUTHOR})
+        self.service.memory()
+        profile, = self.profiles()
+        self.assertEqual((profile["subject"], profile["person_id"], profile["text"], profile["source_refs"]),
+                         ("阿弦", who["person_id"], original["text"], [ref(intro)]))
+        later = self.qq(AUTHOR, "722", "现在可以开场了。")
+        current = speaker(self.batch(GROUP), later)
+        self.assertEqual((current["person_id"], current["subject"]), (who["person_id"], "阿弦"))
+        self.assertIn("柳弦", current["aliases"])
+
+    def test_start_refuses_to_join_an_existing_self_and_another_qq_atomically(self):
+        """一次配置把两个已签发身份标成同一人，服务须在就绪前拒绝，移除配置后同库恢复。"""
+        quote = "我叫汐叶。"
+        mine = dict(self.ingest("role-intro", quote, GROUP, kind="self_expression"), quote=quote)
+        theirs = self.qq(AUTHOR, "731", "我叫庭洲。")
+        page = self.batch(GROUP)
+        role, peer = speaker(page, mine), speaker(page, theirs)
+        self.assertNotEqual(role["person_id"], peer["person_id"])
+        receipt = self.publish(page, "two-people", [claim(role, "汐叶", "SELF_NAME", mine),
+                               claim(peer, "庭洲", "SELF_NAME", theirs)],
+                               [subject_change(role, "汐叶", "我在开场时介绍了自己。", mine),
+                                subject_change(peer, "庭洲", "我听到了成员的自我介绍。", theirs)])
+        originals = self.profiles()
+        self.stop_memory()
+        original_config = self.configure_person({"subject": "庭洲", "aliases": ["雨桐"],
+                                                  "qq_sender_id": AUTHOR, "self": True})
+        with self.assertRaisesRegex(RuntimeError, "身份|称呼|self|qq_sender_id|dreamingPeopleFile"):
+            self.service.memory()
+        self.stop_memory()
+        (self.service.out / "memory.properties").write_text(original_config, encoding="utf-8")
+        self.service.memory()
+        self.assertCountEqual(self.profiles(), originals)
+        self.assertEqual(self.receipt("two-people"), receipt)
+        role_source = self.ingest("role-back", "我看到了。", GROUP, kind="self_expression")
+        peer_source = self.qq(AUTHOR, "732", "我收到了。")
+        restored = self.batch(GROUP)
+        self.assertEqual(restored["after"], receipt["through"])
+        for s, pid, name in ((role_source, role["person_id"], "汐叶"), (peer_source, peer["person_id"], "庭洲")):
+            person = speaker(restored, s)
+            self.assertEqual((person["person_id"], person["subject"]), (pid, name))
+            self.assertNotIn("雨桐", person["aliases"])
 
 
 if __name__ == "__main__":
