@@ -64,8 +64,8 @@ class GroupHistory(DreamingCase):
         self.assertNotIn("speaker_person_id", note)
 
     def test_members_can_publish_separate_facts_without_addressing_the_bot(self):
-        """两人在同一群对话，名片与自称各有依据；撤掉名片，只失效以它命名的档案。"""
-        first = history_row("带谱的成员", GID, AUTHOR, "-701", "我带了两本校订过的总谱。")
+        """图片附文和另一位成员的原话均可写入各自档案，撤掉名片只影响以它命名的档案。"""
+        first = history_row("带谱的成员", GID, AUTHOR, "-701", "[图片 合成总谱]我带了两本校订过的总谱。")
         card = history_row("送谱人的资料", GID, AUTHOR, "-701", "泽芹", card=True)
         second = history_row("校音的成员", GID, OTHER, "702", "我叫林梧。我负责给第二把琴校音。")
         rows = (first, card, second)
