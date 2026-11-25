@@ -30,7 +30,7 @@ def publication(page, key, changes):
             "context": internal("ROUTER"), "source_instance": INSTANCE, "event_id": key, "changes": changes}
 
 
-class Dreaming(unittest.TestCase):
+class DreamingCase(unittest.TestCase):
     """每个场景独占一个服务数据目录，凭据、修订和水位只从公开出口观察。"""
 
     def setUp(self):
@@ -39,8 +39,9 @@ class Dreaming(unittest.TestCase):
         self.service.env["NC_DREAM_AUTHOR_TOKEN"] = self.author_token
         with (self.service.out / "memory.properties").open("a", encoding="utf-8") as f:
             f.write(f"grantAccountId={ACCOUNT}\ngrantAccessTokenEnv=NC_DREAM_AUTHOR_TOKEN\n")
+            f.write(f"sessionIsolation={self.session_isolation}\n")
         self.addCleanup(self.stop_memory)
-        self.service.memory()
+        self.health = self.service.memory()
 
     def stop_memory(self):
         process = self.service.mproc
@@ -91,6 +92,11 @@ class Dreaming(unittest.TestCase):
 
         self.assertCountEqual([fields(p) for p in actual], [fields({**p, "author": "DREAMING",
                               "version": p["expected_version"] + 1}) for p in expected])
+
+
+class Dreaming(DreamingCase):
+    # 受众撤权案例以启用会话隔离为前提，普通跨会话引用须经原作者授权。
+    session_isolation = "true"
 
     def test_publish_first_person_text(self):
         """Misty 以“我”陈述自己对人物的认识，原句随来源和署名一起发布。"""
@@ -339,6 +345,39 @@ class Dreaming(unittest.TestCase):
         self.post("commit", {**command, "context": internal()}, 403)
         self.assertEqual(self.post("receipt", lookup)["status"], "NOT_FOUND")
         self.assertEqual(self.post("commit", command)["status"], "DURABLE")
+
+
+class SharedSessionDreaming(DreamingCase):
+    """角色内普通历史共享时，Dreaming 仍依据本次 scopes 和专属授权整理。"""
+    session_isolation = "false"
+
+    def test_consolidates_explicitly_scoped_sessions(self):
+        """两个获准会话的一手原话可共同支撑同一角色的认识。"""
+        self.assertIs(self.health.get("session_isolation"), False)
+        date = self.ingest("date", "合奏定在周四。", STUDIO)
+        room = self.ingest("room", "合奏在南排练厅进行。", GROUP)
+        page = self.batch(STUDIO, GROUP)
+        self.assertEvidence(page, date, room)
+        profile = change("topic", "合奏", "我记得周四的合奏安排在南排练厅。", [date, room])
+        self.post("commit", publication(page, "scoped-rehearsal", [profile]))
+        self.assertProfiles(profile)
+
+    def test_shared_citation_cannot_authorize_dreaming(self):
+        """普通受众可以引用另一会话的原文；Dreaming 缺少该会话的整理授权时必须拒绝。"""
+        self.assertIs(self.health.get("session_isolation"), False)
+        local = self.ingest("local", "排练组已登记器材。", GROUP)
+        detail = "青桐组的螺纹谱架锁在蓝柜里。"
+        outside = self.ingest("other-group", detail, FIELD, privacy="sensitive")
+        read = self.service.api("read", dict(context=context(GROUP, "MASTER"), kind="HISTORY",
+                                             use="CITE", targets=[outside]))["items"]
+        self.assertEqual([(item["ref"], item["text"], item["citation_scope"]) for item in read],
+                         [(outside, detail, GROUP)])
+
+        page = self.batch(GROUP)
+        self.assertEvidence(page, local)
+        mixed = change("topic", "器材", "我记得排练组登记了器材，青桐组的谱架锁在蓝柜里。", [local, outside])
+        self.post("commit", publication(page, "ordinary-citation", [mixed]), 409)
+        self.assertProfiles()
 
 
 if __name__ == "__main__":
