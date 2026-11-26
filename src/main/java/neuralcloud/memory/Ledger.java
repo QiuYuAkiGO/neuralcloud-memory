@@ -272,8 +272,9 @@ final class Ledger {
 
     /** 校验渠道元数据与会话的一致性。只有移动群的明确通知可以取得成员引用权。 */
     private void channel(Access ctx, JsonObject channel, String kind) {
-        keys(channel, "platform account_id sender_id message_id conversation_id type");
+        String common = "platform account_id sender_id message_id conversation_id type";
         if (one(channel, "platform", "qq", "mistyai").equals("mistyai")) {
+            keys(channel, common);
             one(channel, "type", "mobile_group_notice");
             String group = "group:mistyai:" + Access.mobileInstance(channel, "account_id");
             Access.mobileId(channel, "sender_id");
@@ -283,12 +284,28 @@ final class Ledger {
             return;
         }
         String type = one(channel, "type", "qq_private", "qq_group", "qq_group_notice");
+        // 加工后的通知与角色自己的记录没有入站发送者名片、提及或回复上下文。
+        boolean incoming = kind.equals("observation") && !type.equals("qq_group_notice");
+        keys(channel, incoming ? common + " nickname mention_ids reply_message_id"
+                + (type.equals("qq_group") ? " card" : "") : common);
         if (type.equals("qq_group_notice") && !kind.equals("observation"))
             throw invalid("channel.type");
         String account = Access.qqId(channel, "account_id"),
                 sender = Access.qqId(channel, "sender_id");
         String scope = text(channel, "conversation_id", 256);
         text(channel, "message_id", 128);
+        if (channel.has("nickname")) text(channel, "nickname", 128);
+        if (channel.has("card")) text(channel, "card", 128);
+        if (channel.has("reply_message_id")) text(channel, "reply_message_id", 128);
+        if (channel.has("mention_ids")) {
+            var seen = new HashSet<String>();
+            for (var raw : array(channel, "mention_ids", 1, 64)) {
+                if (!(raw instanceof JsonPrimitive p) || !p.isString()
+                        || !p.getAsString().matches("[1-9][0-9]{4,15}")
+                        || p.getAsString().equals(account) || !seen.add(p.getAsString()))
+                    throw invalid("channel.mention_ids");
+            }
+        }
         if (!ctx.scope().equals(scope)) throw denied();
         if (type.equals("qq_private")) {
             ctx.requireQq();

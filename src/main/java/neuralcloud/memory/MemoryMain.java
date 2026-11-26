@@ -83,6 +83,7 @@ public final class MemoryMain {
         fields.remove("retrievalMode");
         fields.remove("organizeIntervalSeconds");
         fields.remove("sessionIsolation");
+        fields.remove("dreamingPeopleFile");
         var visibility = new Visibility(switch (settings.getProperty("sessionIsolation", "false")) {
             case "true" -> true;
             case "false" -> false;
@@ -123,11 +124,14 @@ public final class MemoryMain {
         int port = Integer.parseInt(settings.getProperty("port"));
         if (port < 1 || port > 65535) throw new IllegalArgumentException("port");
         // 先获取数据库锁并校验角色身份与 FTS5 可用性，确认存储就绪后再暴露 HTTP 监听。
+        String peopleFile = settings.getProperty("dreamingPeopleFile");
+        if (peopleFile != null && peopleFile.isBlank()) throw new IllegalArgumentException("dreamingPeopleFile");
         var store =
                 new Store(
                         config.getParent().resolve(settings.getProperty("dataDirectory")),
                         character,
-                        source);
+                        source,
+                        peopleFile == null ? null : config.getParent().resolve(peopleFile));
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", port), 64);
         var service = new MemoryMain(store, token, channelToken, account, mode, visibility);
         server.createContext("/v2/", service::handle);
@@ -218,6 +222,7 @@ public final class MemoryMain {
                                             keys(body, "");
                                             var info = store.info();
                                             info.getAsJsonArray("capabilities").add("dreaming");
+                                            info.getAsJsonArray("capabilities").add("dreaming_qq_aliases");
                                             // 根据本实例启用的检索模式与渠道授权配置，动态宣告可用能力集合。
                                             info.getAsJsonArray("capabilities")
                                                     .add("audience_reads");

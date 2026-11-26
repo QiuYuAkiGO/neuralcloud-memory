@@ -18,7 +18,7 @@ import java.util.*;
  * <ul>
  *   <li>通过目录内 {@code memory.lock} 文件排他锁确保同一角色主体目录同一时刻仅有一个写进程，避免并发破坏恢复边界。</li>
  *   <li>启用 WAL、{@code synchronous=FULL} 与外键约束，保证持久回执与事务原子落盘。</li>
- *   <li>启动事务内执行空库建表或 v2 至 v5 原地模式迁移、核对 {@code character_id} 身份并验证 FTS5 可用性，全部通过后才提交并对外开放服务。</li>
+ *   <li>启动事务内初始化格式 7 或升级旧库，核对 {@code character_id}、人物绑定及 FTS5，全部通过后才对外开放服务。</li>
  *   <li>通过 {@link #transaction(Work)} 串行化单次请求，保证读取水位（{@code read_seq}）与返回数据来自同一权威快照。</li>
  * </ul>
  */
@@ -26,6 +26,7 @@ final class Store implements AutoCloseable {
     final Connection db;
     /** 绑定的角色主体 ID、当前数据历史流 ID 与唯一允许的写入方实例名。 */
     final String character, stream, writer;
+    final DreamPeople dreamPeople;
     private final FileChannel lock;
 
     /**
@@ -36,6 +37,11 @@ final class Store implements AutoCloseable {
      * @param writer    允许提交写命令的 source_instance 标识
      */
     Store(Path directory, String character, String writer) throws Exception {
+        this(directory, character, writer, null);
+    }
+
+    /** 人物绑定、既有档案归并和格式升级共用启动事务，任何一步失败都不发布新状态。 */
+    Store(Path directory, String character, String writer, Path peopleFile) throws Exception {
         this.character = character;
         this.writer = writer;
         Files.createDirectories(directory);
@@ -66,7 +72,7 @@ final class Store implements AutoCloseable {
                         .isEmpty()) throw new IOException("unrecognized existing database");
                 schema("/schema.sql");
                 update("INSERT INTO meta VALUES(?,?)", character, UUID.randomUUID().toString());
-            } else if (version < 2 || version > 5)
+            } else if (version < 2 || version > 7)
                 throw new IOException("unsupported schema version " + version);
             // 旧库原地增加授权索引（v2 -> v3），保留原有流标识、版本与消费水位。
             if (version < 3) schema("/visibility.sql");
@@ -97,11 +103,26 @@ final class Store implements AutoCloseable {
             }
             // v4 -> v5 增加独立档案、覆盖水位与回执，不改写旧 Master 印象或原始流。
             if (version < 5) schema("/dreaming.sql");
+            if (version < 6) schema("/dreaming-people.sql");
+            // 格式七把称呼和人物分开；旧覆盖位置是历史回扫的固定上界，原流与成功回执保持有效。
+            if (version < 7) {
+                schema("/dream-identity.sql");
+                schema("/dream-profile-people.sql");
+            }
+            // 追加到格式七的导入回执按旧档版本幂等，历史标题不会因此成为人物别称。
+            update("""
+                    CREATE TABLE IF NOT EXISTS dream_legacy_imports(
+                        profile_key TEXT NOT NULL,version INTEGER NOT NULL,subject TEXT NOT NULL REFERENCES dream_person_names(name),
+                        PRIMARY KEY(profile_key,version))
+                    """);
             var metadata = rows("SELECT * FROM meta").getFirst();
             // 校验目录归属的角色主体，防止错配配置把 A 角色的数据挂到 B 角色进程。
             if (!character.equals(get(metadata, "character_id")))
                 throw new IOException("character_id mismatch");
             stream = get(metadata, "stream_id");
+            dreamPeople = DreamPeople.load(this, peopleFile);
+            // 人工绑定与既有 QQ、角色身份须在同一启动事务内通过校验，之后才可发布服务。
+            DreamProfiles.bindExisting(this);
             // 探测 FTS5 扩展是否正常加载且索引表可读，确认就绪后再暴露 HTTP 端口。
             rows("SELECT rowid FROM search WHERE search MATCH 'ready' LIMIT 1");
             db.commit();
