@@ -4,7 +4,23 @@ Java 21 记忆服务负责原文与修订、派生来源、全文检索、持久
 
 ## Dreaming 档案
 
-启用 Dreaming 的 Harness 使用 `/v2/dreaming/batch` 领取一手材料，通过 `commit` 和 `receipt` 推进独立覆盖水位。`/v2/dreaming/profiles` 按受众复核每条依据的 CITE 权限。启动时自动将既有 v2 至 v4 角色库迁移到 schema 5，保留原始流与 Master 印象。构建两仓后运行 `python -X utf8 tests/dreaming.py` 可复验整理、授权、修订、撤回与重启。[HTTP 契约](contracts/v2/openapi.json)
+启用 Dreaming 的 Harness 通过 `dreaming_qq_aliases` 能力握手，在 `/v2/dreaming/batch` 中取得一手原话及其真实 QQ 发言人的 `person_id`。本人自称、明确的全局称呼偏好、能核实指向和应答者的问答可作为称呼依据。转述或含糊的称呼留待后续本人发言确认，群名片在原群内生效。已有主称呼时，普通新别称加入同一人的索引。[HTTP 契约](contracts/v2/openapi.json)
+
+同一批次可以单独提交 `name_claims`，也可以同时修订人物认识。Memory 在同一事务内核对已签发的人物版本、原句和来源修订，保存认识、覆盖水位及持久回执。`/v2/dreaming/profiles` 对受众分别核对认识与身份依据的 CITE 权限。撤回唯一的别称依据会拆开通过该称呼才连接的旧档。
+
+启动时，格式 2 至 6 的角色库自动升级至 7。旧档保留自己的正文、历史和来源。已覆盖的记录通过 `identity_backfill` 分页回扫，可与实时整理交替推进。历史命令仍可查询或重放原回执。依据不足或存在多个可能归属时，保留各自的旧档。
+
+要归并已确认属于同一人的旧档，在 Memory 配置中设置 `dreamingPeopleFile=dreaming-people.json`。文件路径相对于该配置文件，内容采用 UTF-8。例如下列绑定让“小雾”和“Misty”共用“小雾”档案。普通人物可选填 `qq_sender_id`（QQ 号字符串）来识别发件人。`self: true` 标记本角色。账号与旧私聊标题保存在部署方的私有文件中。
+
+```json
+{"character_id":"misty","people":[{"subject":"小雾","aliases":["Misty"],"self":true}]}
+```
+
+首次载入会在启动事务中保存人工绑定并归并有效原文，可重复载入。后续启动可省略配置文件。已有人工主名优先，之后的新别称可从 QQ 入站和一手对话自动学习。确认属于同一人的档案去重后引用超过 16 条时，Memory 从各原档交替摘录一手记录，精简现版中的每段摘录按编号对应一条引用。原档全文及全部引用保存在历史修订。引用至多 16 条时沿用完整正文归并及原有长度限制。
+
+对已经核实归属、但旧标题本身有误的档案，可在相应人物配置中附 `"legacy_profiles":[{"subject":"排练室旧档","expected_version":2}]`。Memory 只归入清单所指的当前版本，`aliases` 单独登记可以继续使用的别称。旧档缺失、版本不符或与另一人物的绑定冲突时整份清单回滚。成功归档后重复载入同一项沿用原导入回执。
+
+构建后运行 `python -X utf8 tests/dreaming_qq_aliases.py` 验证称呼、权限和撤回。将环境变量 `NC_DREAMING_V6_JAR` 指向格式 6 的正式 JAR，再运行 `tests/dreaming_qq_backfill.py` 和 `tests/dreaming_qq_legacy_profiles.py`，可验证旧库回扫、回执与档案拆回。
 
 ## 构建和复跑首版验收
 
