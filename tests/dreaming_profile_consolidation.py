@@ -174,8 +174,14 @@ class ProfileConsolidation(LegacyPeopleCase):
         self.assertEqual(self.post("commit", first_command), first_receipt)
         self.assertEqual(self.post("commit", command), receipt)
 
-        probe = self.qq("962", "下一次排练定在周三。")
+        # 在下一批明确触及错标题及其同名主题，检查签发给模型的档案版本。
+        probe = self.ingest("group-962", f"我在{ACCOUNT}这个主题下补记了木盒。", GROUP, topic=ACCOUNT,
+                            channel=dict(platform="qq", type="qq_group", account_id=ACCOUNT, sender_id=AUTHOR,
+                                         conversation_id=GROUP, message_id="962"))
         page = self.page_for(probe)
+        issued = [(p["kind"], p["subject"], p["version"]) for p in page["profiles"]]
+        self.assertIn(("topic", ACCOUNT, 1), issued)
+        self.assertNotIn(("person", ACCOUNT, 2), issued)
         who = self.subject_for(page, probe)
         self.assertEqual(who["subject"], "柳舟")
         self.assertIn("夜舟", who["aliases"])
@@ -183,6 +189,44 @@ class ProfileConsolidation(LegacyPeopleCase):
         names, = [p for p in page["person_names"] if p["subject"] == "柳舟"]
         self.assertIn("夜舟", names["aliases"])
         self.assertNotIn(ACCOUNT, names["aliases"])
+
+    def test_one_time_import_revises_the_existing_qq_profile_and_keeps_its_namesake(self):
+        """新协议已按 QQ 身份为两位同名人建档，清单应修订指定账号已有的那一档。"""
+        box = self.qq("981", "我把首演票根放进蓝盒。", sender=OTHER)
+        old = change("person", ACCOUNT, "我记得对方把首演票根放进蓝盒。", [box])
+        self.publish_old("wrong-box-label", old)
+        self.restart()
+
+        def create_profile(number, sender, habit, text):
+            """先让同名者发布，再让归档对象在该标题已有人使用时建立自己的档案。"""
+            intro = "我叫白鹿。"
+            source = self.qq(number, intro + habit, sender=sender)
+            page = self.page_for(source)
+            person = self.subject_for(page, source)
+            profile = subject_change(person, "白鹿", text, source)
+            name = claim(person, "白鹿", "SELF_NAME", dict(source, quote=intro))
+            self.post("commit", dict(publication(page, "bailu-" + number, [profile]), name_claims=[name]))
+            return person["person_id"], profile
+
+        namesake, _ = create_profile("982", "45678", "我习惯使用透明谱夹。", "我记得另一位白鹿习惯用透明谱夹。")
+        owner, main = create_profile("983", OTHER, "我给鼓刷贴上白字标签。", "我记得这位白鹿给鼓刷贴上白字标签。")
+        self.assertNotEqual(owner, namesake)
+        before = self.profiles()
+        self.assertCountEqual([p["subject"] for p in before], [ACCOUNT, "白鹿", "白鹿"])
+        established = {p["person_id"]: p for p in before if p["subject"] == "白鹿"}
+
+        self.load_people([PRIMARY, {"subject": "白鹿", "aliases": ["小鹿"], "qq_sender_id": OTHER,
+                                    "legacy_profiles": [{"subject": ACCOUNT, "expected_version": 1}]}])
+        current = self.profiles()
+        self.assertCountEqual([(p["kind"], p["subject"], p.get("person_id")) for p in current],
+                              [("person", "白鹿", owner), ("person", "白鹿", namesake)])
+        by_id = {p["person_id"]: p for p in current}
+        merged = by_id[owner]
+        self.assertEqual(merged["version"], established[owner]["version"] + 1)
+        self.assertIn(main["text"], merged["text"])
+        self.assertIn(old["text"], merged["text"])
+        self.assertCountEqual(merged["source_refs"], [*main["source_refs"], box])
+        self.assertEqual(by_id[namesake], established[namesake])
 
     def test_legacy_import_rejects_invalid_versions_and_conflicting_owners_atomically(self):
         """同一旧档已有第二版；缺版本、旧版本以及企图改写他人归属的清单均须整批回滚。"""
