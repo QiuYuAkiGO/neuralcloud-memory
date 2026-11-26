@@ -112,17 +112,9 @@ final class DreamPeople {
             if (!target.equals(get(prior.getFirst(), "subject"))) throw invalid("legacy_profiles.subject 已归入其他人物档案");
             return false;
         }
-        var rows = store.rows("""
-                SELECT p.version,p.active,k.person_id FROM dream_profiles p
-                LEFT JOIN dream_profile_people m ON m.profile_key=p.subject
-                LEFT JOIN dream_identities k ON k.person_id=m.person_id
-                WHERE p.kind='person' AND p.subject=?
-                """, title);
-        if (rows.isEmpty() || num(rows.getFirst(), "active") != 1 || num(rows.getFirst(), "version") != version)
+        if (store.rows("SELECT 1 FROM dream_profiles WHERE kind='person' AND subject=? AND active=1 AND version=?",
+                title, version).isEmpty())
             throw invalid("legacy_profiles.expected_version 须与有效旧人物档的当前版本一致 " + title);
-        var current = rows.getFirst().get("person_id");
-        if (!current.isJsonNull() && !current.getAsString().equals(DreamIdentities.manualId(store, target)))
-            throw invalid("legacy_profiles.subject 已绑定到其他人物 " + title);
         store.update("INSERT INTO dream_legacy_imports(profile_key,version,subject) VALUES(?,?,?)", title, version, target);
         return true;
     }
@@ -130,18 +122,35 @@ final class DreamPeople {
     /** 只归并仍有效的当前认识。保留原历史版本与回执；旧称的当前入口退役后由登记表指向主称呼。 */
     private static void merge(Store store, String subject, Set<String> legacy) throws SQLException {
         String oldTitles = JSON.toJson(legacy);
-        var rows = store.rows(Dreaming.PROFILE_ROWS + """
-                WHERE p.kind='person' AND p.subject IN (SELECT name FROM dream_person_names WHERE subject=?
-                    UNION SELECT value FROM json_each(?))
+        String owner = DreamIdentities.manualId(store, subject);
+        // 新协议的人物可能已经用稳定键发布过多版。续写同一键可保留其版本和同名者各自的归属。
+        String established = DreamProfiles.keyOf(store, owner);
+        String primary = established == null ? subject : established;
+        var rows = store.rows("""
+                SELECT p.subject,p.version,p.active,v.body,d.person_id AS bound_owner FROM dream_profiles p
+                JOIN dream_revisions v USING(kind,subject,version)
+                LEFT JOIN dream_profile_people m ON m.profile_key=p.subject
+                LEFT JOIN dream_identities d ON d.person_id=m.person_id
+                WHERE p.kind='person' AND (p.subject=? OR p.subject IN
+                    (SELECT name FROM dream_person_names WHERE subject=? UNION SELECT value FROM json_each(?)))
                 ORDER BY p.subject<>?,p.subject
-                """, subject, oldTitles, subject);
-        boolean hasLiveAlias = rows.stream().anyMatch(r -> num(r, "active") == 1 && !get(r, "subject").equals(subject));
+                """, primary, subject, oldTitles, primary);
+        boolean hasLiveAlias = rows.stream().anyMatch(r -> num(r, "active") == 1 && !get(r, "subject").equals(primary));
         if (!hasLiveAlias) return;
         var bodies = new ArrayList<JsonObject>();
+        var parts = new LinkedHashMap<String, Long>();
         long version = 0;
         for (var row : rows) {
-            if (get(row, "subject").equals(subject)) version = num(row, "version");
-            if (num(row, "active") == 1) bodies.add(parse(get(row, "body")));
+            String key = get(row, "subject");
+            long edition = num(row, "version");
+            if (key.equals(primary)) version = edition;
+            if (num(row, "active") == 1) {
+                var bound = row.get("bound_owner");
+                if (!bound.isJsonNull() && !owner.equals(bound.getAsString()))
+                    throw invalid("dreamingPeopleFile 旧档已绑定其他人物 " + key);
+                parts.put(key, edition);
+                bodies.add(parse(get(row, "body")));
+            }
         }
         var refs = new LinkedHashMap<String, JsonObject>();
         for (var body : bodies)
@@ -163,11 +172,16 @@ final class DreamPeople {
             }
         }
         Dreaming.checkBody(merged);
-        Dreaming.saveRevision(store, merged);
-        store.update("""
-                UPDATE dream_profiles SET active=0 WHERE kind='person' AND subject IN
-                (SELECT name FROM dream_person_names WHERE subject=? AND name<>subject UNION SELECT value FROM json_each(?))
-                """, subject, oldTitles);
+        Dreaming.saveRevision(store, primary, merged);
+        for (var part : parts.entrySet()) {
+            // 以往学到的称呼可能受原会话的引用权约束。合并后仍以原有权限展示相关认识。
+            store.update("""
+                    INSERT OR IGNORE INTO dream_profile_name_refs(profile_key,version,name,scope)
+                    SELECT ?,?,name,scope FROM dream_profile_name_refs WHERE profile_key=? AND version=?
+                    """, primary, num(merged, "version"), part.getKey(), part.getValue());
+            if (!primary.equals(part.getKey()))
+                store.update("UPDATE dream_profiles SET active=0 WHERE kind='person' AND subject=?", part.getKey());
+        }
     }
 
     boolean isAlias(String name) {

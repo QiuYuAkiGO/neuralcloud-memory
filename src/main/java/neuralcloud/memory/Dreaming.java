@@ -218,7 +218,12 @@ AND g.target=? AND g.use='CITE' AND g.status='ACTIVE'))
             }
 
             // 主题沿用原版本。已退役的档案只交付当前版本号及仍合法的独立原文。
-            for (var row : store.rows(PROFILE_ROWS + " WHERE p.kind='topic' OR p.active=0 ORDER BY p.kind,p.subject")) {
+            // 一次性归档的旧版本只供查历史。其他退役档及同名主题仍可在新材料里重新取证。
+            for (var row : store.rows(PROFILE_ROWS + """
+                    WHERE p.kind='topic' OR (p.active=0 AND NOT EXISTS
+                        (SELECT 1 FROM dream_legacy_imports i WHERE i.profile_key=p.subject AND i.version=p.version))
+                    ORDER BY p.kind,p.subject
+                    """)) {
                 var body = parse(get(row, "body"));
                 String kind = get(row, "kind"), subject = get(body, "subject");
                 if (kind.equals("person") && store.dreamPeople.isAlias(subject)) continue;
@@ -475,11 +480,7 @@ AND g.target=? AND g.use='CITE' AND g.status='ACTIVE'))
     }
 
     /** 版本正文和撤回依赖索引必须在同一事务内完成，供普通修订和旧人物归并共用。 */
-    static void saveRevision(Store store, JsonObject profile) throws SQLException {
-        saveRevision(store, get(profile, "subject"), profile);
-    }
-
-    private static void saveRevision(Store store, String subject, JsonObject profile) throws SQLException {
+    static void saveRevision(Store store, String subject, JsonObject profile) throws SQLException {
         String kind = get(profile, "kind");
         long next = num(profile, "version");
         store.update(

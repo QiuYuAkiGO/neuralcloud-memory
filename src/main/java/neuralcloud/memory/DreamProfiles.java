@@ -50,7 +50,7 @@ final class DreamProfiles {
 
     static String legacyId(String character, String key) { return recordId(character, "dream-legacy:" + key); }
 
-    private static String keyOf(Store store, String owner) throws SQLException {
+    static String keyOf(Store store, String owner) throws SQLException {
         var rows = store.rows("SELECT profile_key FROM dream_profile_people WHERE person_id=?", owner);
         return rows.isEmpty() ? null : get(rows.getFirst(), "profile_key");
     }

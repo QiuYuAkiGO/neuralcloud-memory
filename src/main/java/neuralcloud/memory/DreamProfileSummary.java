@@ -4,12 +4,15 @@ import static neuralcloud.memory.Fields.*;
 
 import com.google.gson.*;
 import java.sql.SQLException;
+import java.text.BreakIterator;
 import java.util.*;
 
 /** 已确认属于同一人、但完整引用超过单档上限时，从各原档交替摘录确实可引用的原话。 */
 final class DreamProfileSummary {
     static final int MAX_REFS = 16;
     private static final int EXCERPT_LENGTH = 80;
+    private static final Map<String, String> LABELS = Map.of(
+            "self_expression", "我当时说", "tool_result", "工具记录", "observation", "原文");
 
     private DreamProfileSummary() {}
 
@@ -32,20 +35,23 @@ final class DreamProfileSummary {
         for (var row : rows) originals.put(get(row, "id"), row);
         var text = new StringBuilder("我记下了与").append(get(result, "subject")).append("有关的这些原话。");
         int index = 0;
+        var sentences = BreakIterator.getSentenceInstance(Locale.CHINESE);
         for (var entry : selected.entrySet()) {
             var row = originals.get(entry.getKey());
             if (row == null || num(row, "revision") != num(entry.getValue(), "revision")) return false;
             String content = get(parse(get(row, "body")), "content").strip();
             int length = content.codePointCount(0, content.length());
-            String label = switch (get(row, "kind")) {
-                case "self_expression" -> "我当时说";
-                case "tool_result" -> "工具记录";
-                case "observation" -> "原文";
-                default -> throw new IllegalStateException("非一手记录进入 Dreaming 摘录");
-            };
-            text.append("\n[").append(++index).append("] ").append(label).append("「")
-                    .append(content, 0, content.offsetByCodePoints(0, Math.min(length, EXCERPT_LENGTH))).append("」");
-            if (length > EXCERPT_LENGTH) text.append("…");
+            int end = content.length();
+            if (length > EXCERPT_LENGTH) {
+                // 优先停在完整句末。单句本身超过预算时按码点截取，并在引号外标明节略。
+                int limit = content.offsetByCodePoints(0, EXCERPT_LENGTH);
+                sentences.setText(content);
+                int boundary = sentences.preceding(limit + 1);
+                end = boundary > 0 ? boundary : limit;
+            }
+            text.append("\n[").append(++index).append("] ").append(LABELS.get(get(row, "kind")))
+                    .append("「").append(content, 0, end).append("」");
+            if (end < content.length()) text.append("…");
         }
         result.addProperty("text", text.toString());
         result.addProperty("scope", "已确认归属的人物档案中仍可引用的对话与记录");
